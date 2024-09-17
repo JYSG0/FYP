@@ -105,36 +105,28 @@ def handle_dpad(event):
         odrv0.axis0.controller.input_pos = 0
 
 
-# Loop to get controller events
-while True:
-    for event in pygame.event.get():
-        # Handle joystick and trigger events
-        if event.type == pygame.JOYAXISMOTION:
-            # Check the left trigger (L2) axis
-            if event.axis == left_trigger_axis:
-                if event.value > 0.1:  # Trigger is pressed beyond a small threshold
-                    left_trigger_pressed = True
-                    odrv0.axis0.controller.input_pos = 0
-                else:
-                    left_trigger_pressed = False
+# Function to handle speed control with triggers (R2 for increasing speed, L2 for decreasing speed)
+def handle_triggers():
+    # Get trigger values (between -1 and 1)
+    right_trigger_value = joystick.get_axis(right_trigger_axis)  # R2
+    left_trigger_value = joystick.get_axis(left_trigger_axis)    # L2
 
-            # Check the right trigger (R2) axis for throttle control
-            elif event.axis == right_trigger_axis:
-                odrv0.axis0.controller.input_pos += 0.1
-                if odrv0.axis0.controller.input_pos > 0.1:  # Significant trigger press for throttle
-                    throttle_percentage = int(odrv0.axis0.controller.input_pos)  # Scale to 0 - 1
-                    right_trigger_pressed = True
-                else:
-                    throttle_percentage = 0  # No throttle when trigger is not pressed
-                    right_trigger_pressed = False
- # Continuously print messages based on the trigger states
-    if right_trigger_pressed:
-        print(f"Accelerating with throttle: {throttle_percentage}%")
-    if left_trigger_pressed:
-        print("Brake")
-
-    # Limit the loop to a reasonable refresh rate
-    time.sleep(0.1)
+    # Check if the right trigger (R2) is pressed to increase speed
+    if right_trigger_value > 0.1:  # Small threshold to avoid accidental movements
+        velocity = right_trigger_value * max_speed  # Scale speed by trigger pressure (max_speed is adjustable)
+        odrv0.axis0.controller.input_vel = velocity  # Set motor speed
+        print(f"Increasing speed: {velocity}")
+    
+    # Check if the left trigger (L2) is pressed to decrease speed
+    elif left_trigger_value > 0.1:  # Small threshold to avoid accidental movements
+        velocity = -(left_trigger_value * max_speed)  # Scale speed negatively by trigger pressure
+        odrv0.axis0.controller.input_vel = velocity  # Set motor speed
+        print(f"Decreasing speed: {velocity}")
+    
+    # If neither trigger is pressed, maintain zero speed (idle)
+    else:
+        odrv0.axis0.controller.input_vel = 0  # Stop the motor
+        print("Motor stopped.")
 
 
 # Function to handle joystick control
