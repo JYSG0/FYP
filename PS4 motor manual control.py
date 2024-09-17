@@ -113,17 +113,21 @@ def handle_triggers():
 
     # Check if the right trigger (R2) is pressed to increase speed
     if right_trigger_value > 0.1:  # Small threshold to avoid accidental movements
-        odrv0.axis0.controller.input_pos += 0.1
-        velocity = right_trigger_value * max_speed  # Scale speed by trigger pressure (max_speed is adjustable)
-        odrv0.axis0.controller.input_pos = velocity  # Set motor speed
-        print(f"Increasing speed: {velocity}")
+        while right_trigger_pressed (True):
+            odrv0.axis0.controller.input_pos += 0.1
+            velocity = right_trigger_value * max_speed  # Scale speed by trigger pressure (max_speed is adjustable)
+            odrv0.axis0.controller.input_pos = velocity  # Set motor speed
+            print(f"Increasing speed: {velocity}")
+
     
     # Check if the left trigger (L2) is pressed to decrease speed
     elif left_trigger_value > 0.1:  # Small threshold to avoid accidental movements
-        odrv0.axis0.controller.input_pos -= 0.1
-        velocity = -(left_trigger_value * max_speed)  # Scale speed negatively by trigger pressure
-        odrv0.axis0.controller.input_pos = velocity  # Set motor speed
-        print(f"Decreasing speed: {velocity}")
+        while left_trigger_pressed (True):
+            odrv0.axis0.controller.input_pos -= 0.1
+            velocity = -(left_trigger_value * max_speed)  # Scale speed negatively by trigger pressure
+            odrv0.axis0.controller.input_pos = velocity  # Set motor speed
+            print(f"Decreasing speed: {velocity}")
+        
     
     # If neither trigger is pressed, maintain zero speed (idle)
     else:
