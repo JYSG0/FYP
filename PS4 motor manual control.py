@@ -39,26 +39,25 @@ left_trigger_axis = 4  # L2 Trigger (Brake)
 right_trigger_axis = 5  # R2 Trigger (Throttle)
 
 # Motor control parameters
-throttle_percentage = 0
-motor_moving = False
+position_increment = 0.05  # Smaller increment for position control
+current_position = 0.0
 
 # Joystick axis threshold for movement sensitivity
 trigger_threshold = 0.1
 
-# Function to move motor forward (using velocity control)
-def move_motor_forward(throttle):
-    global motor_moving
-    velocity = throttle * 100  # Scale the throttle to a velocity (adjust this based on your motor needs)
-    odrv0.axis0.controller.input_vel = velocity  # Set velocity control on the motor
-    motor_moving = True
-    print(f"Motor moving forward with velocity: {velocity}")
+# Function to move motor forward (using position control)
+def move_motor_forward():
+    global current_position
+    current_position += position_increment  # Increment position by a small value
+    odrv0.axis0.controller.input_pos = current_position  # Update motor position
+    print(f"Motor moving forward to position: {current_position}")
 
-# Function to stop the motor
+# Function to stop the motor (reset to a position, e.g., 0)
 def stop_motor():
-    global motor_moving
-    odrv0.axis0.controller.input_vel = 0  # Set velocity to 0 to stop the motor
-    motor_moving = False
-    print("Motor stopped")
+    global current_position
+    current_position = 0.0  # Reset the position
+    odrv0.axis0.controller.input_pos = current_position  # Set motor to reset position
+    print("Motor stopped, resetting to position 0")
 
 # Loop to get controller events and control the motor
 while True:
@@ -69,11 +68,7 @@ while True:
             if event.axis == right_trigger_axis:
                 trigger_value = (event.value + 1) / 2  # Convert value from [-1, 1] to [0, 1]
                 if trigger_value > trigger_threshold:  # Significant trigger press for throttle
-                    throttle_percentage = trigger_value  # Scale from 0 to 1
-                    move_motor_forward(throttle_percentage)
-                else:
-                    if motor_moving:
-                        stop_motor()
+                    move_motor_forward()
 
             # Check the left trigger (L2) axis for stopping the motor (Brake)
             elif event.axis == left_trigger_axis:
