@@ -57,14 +57,12 @@ else:
 joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
-# PS4 controller trigger axes:
-# Typically, L2 (left trigger) is axis 4 and R2 (right trigger) is axis 5.
-left_trigger_axis = 4
-right_trigger_axis = 5
+# Joystick axis threshold for movement sensitivity
+joystick_movement_threshold = 0.1
 
-# Track trigger states
-right_trigger_pressed = False
-left_trigger_pressed = False
+# Joystick axes (1 = left stick vertical, 2 = right stick horizontal)
+left_vertical_axis = 1  # left stick vertical (up/down)
+right_horizontal_axis = 2  # right stick horizontal (left/right)
 
 # Function to find and connect to ODrive
 def connect_to_odrive():
@@ -104,53 +102,43 @@ def handle_dpad(event):
     elif event.value == (-1, 0):  # RIGHT
         odrv0.axis0.controller.input_pos = 0
 
-
-# Function to handle speed control with triggers (R2 for increasing speed, L2 for decreasing speed)
-def handle_triggers():
-    # Get trigger values (between -1 and 1)
-    right_trigger_value = joystick.get_axis(right_trigger_axis)  # R2
-    left_trigger_value = joystick.get_axis(left_trigger_axis)    # L2
-
-    # Check if the right trigger (R2) is pressed to increase speed
-    if right_trigger_value > 0.1:  # Small threshold to avoid accidental movements
-        while right_trigger_pressed (True):
-            odrv0.axis0.controller.input_pos += 0.1
-            velocity = right_trigger_value * max_speed  # Scale speed by trigger pressure (max_speed is adjustable)
-            odrv0.axis0.controller.input_pos = velocity  # Set motor speed
-            print(f"Increasing speed: {velocity}")
-
-    
-    # Check if the left trigger (L2) is pressed to decrease speed
-    elif left_trigger_value > 0.1:  # Small threshold to avoid accidental movements
-        while left_trigger_pressed (True):
-            odrv0.axis0.controller.input_pos -= 0.1
-            velocity = -(left_trigger_value * max_speed)  # Scale speed negatively by trigger pressure
-            odrv0.axis0.controller.input_pos = velocity  # Set motor speed
-            print(f"Decreasing speed: {velocity}")
-        
-    
-    # If neither trigger is pressed, maintain zero speed (idle)
-    else:
-        odrv0.axis0.controller.input_vel = 0  # Stop the motor
-        print("Motor stopped.")
-
-
 # Function to handle joystick control
 def handle_joystick(move_left, move_right):
-    if joystick.get_axis(1) <= -0.5:  # Joystick UP
-        odrv0.axis0.controller.input_pos += 0.1
-    elif joystick.get_axis(1) >= 0.5:  # Joystick DOWN
-        odrv0.axis0.controller.input_pos -= 0.1
+    while True:
+        #update event queue
+        pygame.event.pump()
 
-    if joystick.get_axis(0) <= -0.5 and move_left:  # Joystick LEFT
-        GPIO.output(pwm, GPIO.LOW)
-        GPIO.output(steering, GPIO.HIGH)
-    elif joystick.get_axis(0) >= 0.5 and move_right:  # Joystick RIGHT
-        GPIO.output(pwm, GPIO.LOW)
-        GPIO.output(steering, GPIO.LOW)
-    else:  # Joystick IDLE
-        GPIO.output(pwm, GPIO.HIGH)
-        GPIO.output(steering, GPIO.HIGH)
+        # Get the position of the left stick (vertical)
+        left_vertical_value = joystick.get_axis(left_vertical_axis)
+
+        if abs(left_vertical_value) > joystick_movement_threshold:  # Significant movement threshold
+            degree_of_movement = int(abs(left_vertical_value) * 100)  # Scale movement (0 to 100%)
+            if left_vertical_value <= -0.4:
+                odrv0.axis0.controller.input_pos += 0.1
+                print(f"Moving up, {degree_of_movement}%")
+            elif left_vertical_value > 0:
+                odrv0.axis0.controller.input_pos -= 0.1
+                print(f"Moving down, {degree_of_movement}%")
+        
+
+        # Get the position of the right stick (horizontal)
+        right_horizontal_value = joystick.get_axis(right_horizontal_axis)
+
+        if abs(right_horizontal_value) > joystick_movement_threshold:  # Significant movement threshold
+            degree_of_movement = int(abs(right_horizontal_value) * 100)  # Scale movement (0 to 100%)
+            if right_horizontal_value <= 0.4 and move_left:
+                GPIO.output(pwm, GPIO.LOW)
+                GPIO.output(steering, GPIO.HIGH)
+                print(f"Moving left, {degree_of_movement}%")
+            elif right_horizontal_value >= 0.4 and move_right:
+                GPIO.output(pwm, GPIO.LOW)
+                GPIO.output(steering, GPIO.LOW)
+                print(f"Moving right, {degree_of_movement}%")
+
+
+        else:  # Joystick IDLE
+            GPIO.output(pwm, GPIO.HIGH)
+            GPIO.output(steering, GPIO.HIGH)
 
 # Function to handle limit switch detection
 def check_limit_switches():
