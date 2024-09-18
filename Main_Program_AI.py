@@ -73,18 +73,24 @@ def handle_dpad(event):
         odrv0.axis0.controller.input_pos += 0.1
     elif event.value == (0, -1):  # DOWN
         odrv0.axis0.controller.input_pos -= 0.1
+       
     elif event.value == (1, 0):  # LEFT
-        odrv0.axis0.controller.input_pos = 0
+        odrv0.axis0.requested_state = 1  # Set ODrive to idle state      	
+        odrv0.axis1.requested_state = 1  # Set ODrive to idle state      
     elif event.value == (-1, 0):  # RIGHT
-        odrv0.axis0.controller.input_pos = 0
-
+        odrv0.axis0.requested_state = 8  # Set ODrive to closed loop state     
+        odrv0.axis1.requested_state = 8  # Set ODrive to closed loop state         	
 # Function to handle joystick control
 def handle_joystick(move_left, move_right):
     if joystick.get_axis(1) <= -0.5:  # Joystick UP
-        odrv0.axis0.controller.input_pos += 0.1
+        odrv0.axis1.controller.input_pos += 0.1        #right
     elif joystick.get_axis(1) >= 0.5:  # Joystick DOWN
-        odrv0.axis0.controller.input_pos -= 0.1
-
+        odrv0.axis1.controller.input_pos -= 0.1 	 #right
+    if joystick.get_axis(4) <= -0.5:  # Joystick UP
+        odrv0.axis0.controller.input_pos += 0.1        #left
+    elif joystick.get_axis(4) >= 0.5:  # Joystick DOWN
+        odrv0.axis0.controller.input_pos -= 0.1 	 #left
+        
     if joystick.get_axis(0) <= -0.5 and move_left:  # Joystick LEFT
         GPIO.output(pwm, GPIO.LOW)
         GPIO.output(steering, GPIO.HIGH)
@@ -367,6 +373,7 @@ def main_loop(opt):
                     stop_sign_detected = False
                     stop_sign_handled = False
                     odrv0.axis0.requested_state = 8  # Reactivate ODrive
+                    odrv0.axis1.requested_state = 8 # Reactivate ODrive
                     GPIO.output(pwm, GPIO.LOW)
                     GPIO.output(steering, GPIO.LOW)
 
@@ -448,9 +455,9 @@ emergency_stop_flag = False
 
 # Activate the ODrive
 odrv0.axis0.requested_state = 8
+odrv0.axis1.requested_state = 8 
 
 # Run the main loop
 if __name__ == "__main__":
     opt = parse_opt()
     main_loop(opt)
-
