@@ -1,6 +1,5 @@
 #Stop_Sign can be detected from far away
 #Turn Right must be within 80cm from the camera
-
 import argparse
 import csv
 import os
@@ -22,7 +21,6 @@ from utils.general import (
     non_max_suppression, print_args, scale_boxes, strip_optimizer, xyxy2xywh
 )
 from utils.torch_utils import select_device, smart_inference_mode
-
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -35,11 +33,7 @@ stop_sign_handled = False
 cooldown_timestamp = None
 turn_right_detected = False
 manual_override = False
-
-
-
 valid_pins = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
-
 # Function to find and connect to ODrive
 def connect_to_odrive():
     try:
@@ -51,8 +45,6 @@ def connect_to_odrive():
     except Exception as e:
         print("Error connecting to ODrive:", e)
         exit()
-
-
 # Function to stop the motor and exit the program
 def emergency_stop():
     global emergency_stop_flag
@@ -66,31 +58,22 @@ def emergency_stop():
         print("Error during emergency stop:", e)
     finally:
         print("Emergency Stop!")
-
 # Function to handle D-Pad control
 def handle_dpad(event):
     if event.value == (0, 1):  # UP
         odrv0.axis0.controller.input_pos += 0.1
     elif event.value == (0, -1):  # DOWN
         odrv0.axis0.controller.input_pos -= 0.1
-       
     elif event.value == (1, 0):  # LEFT
-        odrv0.axis0.requested_state = 1  # Set ODrive to idle state      	
-        odrv0.axis1.requested_state = 1  # Set ODrive to idle state      
+        odrv0.axis0.controller.input_pos = 0
     elif event.value == (-1, 0):  # RIGHT
-        odrv0.axis0.requested_state = 8  # Set ODrive to closed loop state     
-        odrv0.axis1.requested_state = 8  # Set ODrive to closed loop state         	
+        odrv0.axis0.controller.input_pos = 0
 # Function to handle joystick control
 def handle_joystick(move_left, move_right):
     if joystick.get_axis(1) <= -0.5:  # Joystick UP
-        odrv0.axis1.controller.input_pos += 0.1        #right
+        odrv0.axis0.controller.input_pos += 0.1
     elif joystick.get_axis(1) >= 0.5:  # Joystick DOWN
-        odrv0.axis1.controller.input_pos -= 0.1 	 #right
-    if joystick.get_axis(4) <= -0.5:  # Joystick UP
-        odrv0.axis0.controller.input_pos += 0.1        #left
-    elif joystick.get_axis(4) >= 0.5:  # Joystick DOWN
-        odrv0.axis0.controller.input_pos -= 0.1 	 #left
-        
+        odrv0.axis0.controller.input_pos -= 0.1
     if joystick.get_axis(0) <= -0.5 and move_left:  # Joystick LEFT
         GPIO.output(pwm, GPIO.LOW)
         GPIO.output(steering, GPIO.HIGH)
@@ -100,7 +83,6 @@ def handle_joystick(move_left, move_right):
     else:  # Joystick IDLE
         GPIO.output(pwm, GPIO.HIGH)
         GPIO.output(steering, GPIO.HIGH)
-
 # Function to handle limit switch detection
 def check_limit_switches():
     global emergency_stop_flag
@@ -114,7 +96,6 @@ def check_limit_switches():
         else:
             print("Within Movable Range")
             return True, True
-
 # YOLOv5 Inference Function
 @smart_inference_mode()
 def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", data=ROOT / "data/coco128.yaml", imgsz=(640, 640), 
@@ -138,13 +119,11 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
     # Directories
     save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)
     (save_dir / "labels" if save_txt else save_dir).mkdir(parents=True, exist_ok=True)
-
     # Load model
     device = select_device(device)
     model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
     stride, names, pt = model.stride, model.names, model.pt
     imgsz = check_img_size(imgsz, s=stride)
-
     # Dataloader
     bs = 1
     if webcam:
@@ -171,7 +150,6 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
                 im = im[None] # expand for batch dim
             if model.xml and im.shape[0] > 1:
                 ims = torch.chunk(im, im.shape[0], 0)
-
         #inference
         with dt[1]:
             visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
@@ -186,10 +164,8 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
             else:
                 pred = model(im, augment=augment, visualize=visualize)
         # NMS
-
         with dt[2]:
             pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-
         # Define the path for the CSV file
         csv_path = save_dir / "predictions.csv"
         
@@ -201,7 +177,6 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
                 if not csv_path.is_file():
                     writer.writeheader()
                 writer.writerow(data)
-
         # Process predictions
         for i, det in enumerate(pred):
             seen += 1
@@ -210,7 +185,6 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
                 s += f"{i}: "
             else:
                 p, im0, frame = path, im0s.copy(), getattr(dataset, "frame", 0)
-
             p = Path(p)
             save_path = str(save_dir / p.name) # im.jpg
             txt_path = str(save_dir / "labels" / p.stem) + ("" if dataset.mode == "image" else f"_{frame}")
@@ -226,8 +200,6 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
                 for c in det[:, 5].unique():
                     n = (det[:, 5] == c).sum() # detections per class
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, " # add to string
-
-
                 # Write results and check for stop sign
                 stop_sign_in_frame = False
                 for *xyxy, conf, cls in reversed(det):
@@ -251,16 +223,13 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
                     
                     confidence = float(conf)
                     confidence_str = f"{confidence:.2f}"
-
                     if save_csv:
                         write_to_csv(p.name, label, confidence_str)
-
                     if save_txt:
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()
                         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)
                         with open(f"{txt_path}.txt", "a") as f:
                             f.write(("%g " * len(line)).rstrip() % line + "\n")
-
                     if save_img or save_crop or view_img: # Add bbox to image
                         c = int(cls)
                         label = None if hide_labels else (names[c] if hide_conf else f"{names[c]} {conf:.2f}")
@@ -271,7 +240,6 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
                 # To reset stop sign handled flag if there is no stop sign in frame
                 if not stop_sign_in_frame:
                 	stop_sign_handled = False
-
             # Stream results
             im0 = annotator.result()
             if view_img:
@@ -281,7 +249,6 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
                     cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
                 cv2.imshow(str(p), im0)
                 cv2.waitKey(1)
-
             # Save results (image with detections)
             if save_img:
                 if dataset.mode == "image":
@@ -302,7 +269,6 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
                     vid_writer[i].write(im0)
         # Print time (inference-only)
         #LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{dt[1].dt * 1E3:.1f}ms")
-
     # Print results
     t = tuple(x.t / seen * 1e3 for x in dt)
     #LOGGER.info(f"Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}" % t)
@@ -311,7 +277,6 @@ def run(stop_event, weights=ROOT / "yolov5s.pt", source=ROOT / "data/images", da
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
     if update:
         strip_optimizer(weights[0])
-
 def parse_opt():
     """Parses command-line arguments for YOLOv5 detection, setting inference options and model configurations."""
     parser = argparse.ArgumentParser()
@@ -347,15 +312,12 @@ def parse_opt():
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
     print_args(vars(opt))
     return opt
-
-
 def main_loop(opt):
     stop_event = threading.Event()
     check_requirements(ROOT / "requirements.txt", exclude=("tensorboard", "thop"))
     #threading.Thread(target=run, kwargs=vars(opt)).start()
     yolo_thread = threading.Thread(target=run, args=(stop_event,), kwargs=vars(opt))
     yolo_thread.start()
-
     global emergency_stop_flag, stop_sign_detected, stop_sign_timestamp, stop_sign_handled, cooldown_timestamp, manual_override, turn_right_detected
     running = True
     move_left = True
@@ -373,11 +335,8 @@ def main_loop(opt):
                     stop_sign_detected = False
                     stop_sign_handled = False
                     odrv0.axis0.requested_state = 8  # Reactivate ODrive
-                    odrv0.axis1.requested_state = 8 # Reactivate ODrive
                     GPIO.output(pwm, GPIO.LOW)
                     GPIO.output(steering, GPIO.LOW)
-
-
         move_left, move_right = check_limit_switches()
         handle_joystick(move_left, move_right)
         
@@ -406,32 +365,24 @@ def main_loop(opt):
         	print("Turning vehicle right.")
         	GPIO.output(pwm, GPIO.LOW)
         	GPIO.output(steering, GPIO.LOW)
-
         
-
         print("Wheel Turns:", "%.1f" % odrv0.axis0.controller.input_pos)
         print("GPIO 12 (PWM) State:", GPIO.input(12))  # Print state of GPIO 12
         print("GPIO 13 (Steering) State:", GPIO.input(13))  # Print state of GPIO 13
         print("GPIO 26 State:", GPIO.input(26))  # Print state of GPIO 26
         print("GPIO 23 State:", GPIO.input(23))  # Print state of GPIO 23
-
         if joystick.get_button(2) == 1:  # B Button
-
             stop_event.set()  # Signal the YOLOv5 thread to stop
             yolo_thread.join()  # Wait for the YOLOv5 thread to finish
             emergency_stop()       
-
         time.sleep(0.1)
         
     yolo_thread.join()
     print("Yolov5 thread has ended.")    
-
 # Connect to ODrive
 odrv0 = connect_to_odrive()
-
 # Display drive voltage
 print("ODrive Voltage:", odrv0.vbus_voltage)
-
 # Initialize GPIOs
 pwm = 12
 steering = 13
@@ -441,22 +392,16 @@ GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup([pwm, steering], GPIO.OUT, initial=GPIO.LOW)
 GPIO.setup([limit1, limit2], GPIO.IN)
-
 # Initialize the display subsystem of Pygame
 pygame.display.init()
-
 # Initialize the joystick module
 pygame.joystick.init()
 joystick = pygame.joystick.Joystick(0)
 joystick.init()
-
 # Flag to indicate emergency stop
 emergency_stop_flag = False
-
 # Activate the ODrive
 odrv0.axis0.requested_state = 8
-odrv0.axis1.requested_state = 8 
-
 # Run the main loop
 if __name__ == "__main__":
     opt = parse_opt()
