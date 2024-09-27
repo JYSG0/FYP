@@ -46,8 +46,6 @@ while True:
             distance = success[center_point[1], center_point[0]]
             cv2.putText(im0, "{}mm".format(distance), (center_point[0], center_point[1] - 20), cv2.FONT_HERSHEY_PLAIN, 2, (0, 0, 0), 2)
 
-            cv2.imwrite(os.path.join(crop_dir_name, str(idx) + ".png"), crop_obj)
-
 
     cv2.imshow("ultralytics", im0)
     cv2.imshow("depth frame", success)
