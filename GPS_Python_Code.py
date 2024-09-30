@@ -1,3 +1,4 @@
+#Libraries/Plug-ins
 import machine
 import math
 import requests
@@ -7,7 +8,7 @@ import json
 from time import localtime
 from micropyGPS import MicropyGPS
 
-# Set up API
+# Set up API - 250,000 requests per month
 api_key = 'SQhcQxSqNhmFGy1cf3vFZP6sUx69OuhkFrWiuHigA-E'
 
 # Instantiate the micropyGPS object
@@ -16,16 +17,21 @@ my_gps = MicropyGPS()
 # Define the UART pins and create a UART o12bject
 gps_serial = machine.UART(2, baudrate=9600, tx=26, rx=25)
 
-#Temporary fixed desLatitude & desLongitude
+#Temporary fixed desLatitude & desLongitude for testing/debugging
 #desLatitude = 1.31151
 #desLongitude = 103.77812
 
+#Variables
 turning_points = []
 compassDirection = ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"]
+instructions = []
 
+#Boolean checks
 roadCurrent = False
 roadNext = False
 inBoundary = False
+route_printed = False
+calibrate = False
 
 #Set up WiFi connection with esp32
 def connect():
@@ -54,8 +60,9 @@ def menu():
         
         if choice == "Address":
             addressName = input("Enter address: ")
-            addressName = addressName.replace(" ", "+")
+            addressName = addressName.replace(" ", "+")	#Replace space with '+' to fit the format in the request url
             return choice, addressName, None, None
+        
         elif choice == "Coordinates":
             try:
                 desLatitude = float(input("Please input destination latitude: "))
@@ -182,6 +189,9 @@ def route(latitude, longitude, desLatitude, desLongitude):
         return None
 
 def decode_polyline(encoded):
+    if not isinstance (encoded, str):
+        raise TypeError("Expected a string for encoded polyline, got {}".format(type(encoded)))
+    
     # Constants from the polyline encoding
     ENCODING_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     DECODING_TABLE = [
@@ -235,24 +245,39 @@ def decode_polyline(encoded):
 
     return result
 
+#Process route data and extract polyline and instructions
 def process_route_data(route_data):
-    """Process route data and extract polyline and instructions."""
-    route = json.loads(route_data)
-    polyline_encoded = route['routes'][0]['sections'][0]['polyline']
-    turnByTurnActions = route['routes'][0]['sections'][0]['turnByTurnActions']
+    # Check if route_data is a dict
+    if not isinstance(route_data, dict):
+        print("Expected route_data to be a dict, got:", type(route_data))
+        return None
+
+    try:
+        polyline_encoded = route_data['routes'][0]['sections'][0]['polyline']
+    except (IndexError, KeyError) as e:
+        print("Failed to extract polyline:", e)
+        return None
+    
+    #print("Encoded polyline:", polyline_encoded)  # Debugging line
+
+    if not isinstance(polyline_encoded, str):
+        print("Expected polyline to be a string, got:", type(polyline_encoded))
+        return None
+    
+    turnByTurnActions = route_data['routes'][0]['sections'][0]['turnByTurnActions']
     
     # Decode polyline into coordinates
     coordinates = decode_polyline(polyline_encoded)
-    #print("Decoded coordinates:", coordinates)
+    #print("Decoded coordinates:", coordinates)  # Debugging line
     
     # Extract turning instructions
     instructions = extract_instructions(turnByTurnActions, coordinates)
-    print("Extracted instructions:", instructions)
+    #print("Extracted instructions:", instructions)	#Debugging line -> Maybe pass to Javascript
     
     return coordinates, instructions
 
+#Calucalate bearing and distance between 2 points on Earth
 def haversine_Bearing(lat1, lon1, lat2, lon2): 
-    """Calculate the bearing and distance between two points on the Earth."""
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     
     dlat = lat2 - lat1
@@ -271,8 +296,8 @@ def haversine_Bearing(lat1, lon1, lat2, lon2):
 
     return compass_bearing, distance
 
+#Identify turning points based on angle changes and distance
 def find_turning_points(coordinates, angle_threshold=50, distance_threshold=5):
-    """Identify turning points based on angle changes and distances."""
     turning_points = []
     compass_directions = []
     
@@ -300,12 +325,12 @@ def find_turning_points(coordinates, angle_threshold=50, distance_threshold=5):
         if delta_angle > angle_threshold and distance_to_prev > distance_threshold:
             turning_points.append((lat2, lon2))
             compass_directions.append(heading)  # Append the heading to the list
-            print(f"Turning point identified at: {lat2}, {lon2} with angle change: {delta_angle:.2f}° and bearing: {heading}")
+            #print(f"Turning point identified at: {lat2}, {lon2} with angle change: {delta_angle:.2f}° and bearing: {heading}")	#Debugging line
 
     return compass_directions, turning_points
 
+#Extract and form readable instructions from route data actions
 def extract_instructions(turnByTurnActions, coordinates):
-    """Extract instructions from route data actions."""
     instructions = []
     action_data = []
 
@@ -325,7 +350,7 @@ def extract_instructions(turnByTurnActions, coordinates):
               continue  # or handle as needed
 
           compass, _ = haversine_Bearing(
-              coordinates[0][0], coordinates[0][1], coordinates[1][0], coordinates[1][1]
+              float(coordinates[0][0]), float(coordinates[0][1]), float(coordinates[1][0]), float(coordinates[1][1])
           )
           idx = round(compass / 45) % 8
           next_road_name = item['next_road'] if item['next_road'] != "N/A" else "unknown road"
@@ -347,8 +372,8 @@ def extract_instructions(turnByTurnActions, coordinates):
 
     return instructions
 
-def compareCoordinates(current_latitude, current_longitude, turning_points, instructions, threshold=20.0):
-    """Compare current coordinates with turning points and return action."""
+#Compare current coordinates with turning points and return its specific action
+def compareCoordinates(current_latitude, current_longitude, turning_points, instructions, threshold=1.5):
     closest_distance = float('inf')
     action = "No action at this location."
     closest_turn_point = None
@@ -371,15 +396,16 @@ def compareCoordinates(current_latitude, current_longitude, turning_points, inst
             closest_idx = i+1  # Save the index of the closest point
 
     if action == "No action at this location.":
-        print(f"Closest distance to turning point {i} in {closest_distance:.2f} meters")
         print("")
+        print(f"Closest distance to turning point {closest_idx} in {closest_distance:.2f} meters")
     
-    if closest_turn_point is not None:
-        print(f"Distance to turning point {i+1} at ({turn_lat}, {turn_lon}): {distance_to_turn:.2f} meters")
+    if closest_turn_point is not None and distance <= threshold:
         print("")
-        #print(f"Closest distance to turning point {closest_idx} at ({closest_turn_point[0]}, {closest_turn_point[1]}): {closest_distance:.2f} meters")
+        print(f"Distance to turning point {closest_idx} at ({turn_lat}, {turn_lon}): {distance_to_turn:.2f} meters")
 
     return action
+
+#===========================================================================================================================================================#
 
 #Connect to WiFi
 connect()
@@ -454,8 +480,9 @@ while True:
                                     route_printed = True
                                 
                             # Call the compareCoordinates function with inputs and print the result
-                            action = compareCoordinates(latitude, longitude, turning_points, instructions)
-                            print(action)
+                        action = compareCoordinates(latitude, longitude, turning_points, instructions)
+                        print(" ")
+                        print(action)
                         
                         time.sleep(1)
                     
