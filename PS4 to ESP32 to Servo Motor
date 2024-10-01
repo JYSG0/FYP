@@ -1,0 +1,45 @@
+#include <PS4Controller.h>
+#include <ESP32Servo.h>
+
+Servo myServo;    // Create a Servo object using ESP32Servo library
+int servoPin = 13; // Connect your servo signal pin to GPIO 13 (change this as needed)
+
+void onConnect() {
+  Serial.println("PS4 Controller connected.");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Initialize the PS4 library and set the callback for connection
+  PS4.begin("00:00:00:00:00:00");  // Optional: Replace with your PS4 controller MAC address, or leave empty
+  PS4.attach(onConnect);
+
+  // Attach the servo to the specified pin and set min/max pulse widths
+  myServo.attach(servoPin, 500, 2400);  // Min and max pulse widths for the servo (in microseconds)
+  myServo.write(0);  // Start the servo at 0 degrees
+
+  Serial.println("Ready to connect to PS4 Controller.");
+}
+
+void loop() {
+  if (PS4.isConnected()) {
+    // If R2 trigger is pressed down, move the servo to 120 degrees
+    if (PS4.R2()) {
+      int r2Value = PS4.R2Value();  // Read the pressure of the R2 trigger (0-255)
+      Serial.print("R2 trigger pressed: ");
+      Serial.println(r2Value);
+
+      if (r2Value > 0) {
+        myServo.write(120);  // Move the servo to 120 degrees
+        Serial.println("Servo moved to 120 degrees.");
+      }
+    } else {
+      // Reset the servo to 0 degrees when R2 is not pressed
+      myServo.write(0);
+      Serial.println("Servo moved back to 0 degrees.");
+    }
+
+    delay(200);  // Small delay for stability and readability
+  }
+}
