@@ -1,0 +1,37 @@
+import pygame
+import serial
+import time
+
+# Set up serial connection to Arduino or ESP32 (adjust the port to match your setup)
+ser = serial.Serial('/dev/ttyACM0', 9600, timeout=1)  # Adjust port for Arduino/ESP32
+
+# Initialize pygame and the joystick (PS4 controller)
+pygame.init()
+pygame.joystick.init()
+
+# Make sure PS4 controller is detected
+if pygame.joystick.get_count() < 1:
+    print("No controller detected")
+    exit()
+
+# Initialize the first joystick (PS4 controller)
+joystick = pygame.joystick.Joystick(0)
+joystick.init()
+
+print(f"Connected to controller: {joystick.get_name()}")
+
+def send_servo_command(command):
+    ser.write(command.encode())  # Send command to Arduino/ESP32
+    print(f"Sent command: {command.strip()}")
+
+while True:
+    pygame.event.pump()  # Process events
+
+    # R2 (right trigger) controls the servo movement to 120 degrees
+    r2_value = joystick.get_axis(5)  # Axis 5 corresponds to the R2 trigger
+    if r2_value > -0.1:  # R2 pressed
+        print(f"R2 pressed with value: {r2_value}")
+        send_servo_command("move_servo\n")
+        time.sleep(1)  # Delay to avoid multiple signals
+
+    time.sleep(0.1)  # Small delay for stability
