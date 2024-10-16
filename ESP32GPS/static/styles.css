@@ -1,0 +1,245 @@
+/* # = id name, . = class name*/
+
+.mapboxgl-ctrl-bottom-left {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  z-index: 2; /* Ensure it's above the map */
+}
+
+.geocoder-container {
+  position: absolute; /* Position relative to the map */
+  top: 10px; /* Adjust this value based on your layout */
+  right: 10px; /* Align to the right */
+  display: flex; /* Use flexbox for alignment */
+  gap: 10px; /* Space between buttons */
+  z-index: 5; /* Ensure it is above the map */
+}
+
+.mapbox-gl-geocoder {
+  flex: 1; /* Allow both geocoders to grow equally */
+  min-width: 200px; /* Set a minimum width */
+}
+
+#map {
+  position: absolute; /* Full screen */
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0; /* Ensure full width */
+  z-index: 0;
+}
+
+#destination {
+  padding: 10px; /* Padding for the search box */
+  margin-bottom: 0; /* Remove margin-bottom */
+}
+
+.search-container {
+  position: absolute; /* Position relative to the map */
+  top: 60px; /* Adjust this value based on your layout */
+  right: 20px; /* Align to the right */
+  display: flex; /* Use flexbox for alignment */
+  gap: 10px; /* Space between buttons */
+  z-index: 1; /* Ensure it is above the map */
+}
+
+#start-route, #view-route {
+  width: 100%; /* Full width of the container */
+  max-width: 150px; /* Set max width for buttons */
+  border-radius: 5px; /* Rounded corners */
+  padding: 10px 15px; /* Padding for size */
+  cursor: pointer; /* Pointer cursor on hover */
+  font-size: 16px; /* Font size */
+  transition: background-color 0.3s; /* Smooth transition for hover */
+  border: 2px solid#007bff; /* No border */
+}
+
+#start-route{
+  background-color: white; /* Blue background */
+  color: #007bff; /* Blue text */
+}
+
+#view-route{
+  background-color: #007bff; /* Blue background */
+  color: white; /* White text */
+}
+
+#start-route:hover{
+  background-color: #007bff; /* Blue background */
+  color: white; /* White text */
+}
+
+#view-route:hover{
+  background-color: white; /* Blue background */
+  color: #007bff; /* White text */
+}
+
+#clear-markers {
+  background-color: white; /* White background */
+  border-radius: 5px; /* Rounded corners */
+  color: #007bff; /* Blue text */
+  padding: 10px;
+  cursor: pointer;
+  margin-left: 10px;
+  font-size: 12px; /* Font size */
+  transition: background-color 0.3s; /* Smooth transition for hover */
+  border: 2px solid#007bff; /* No border */
+}
+
+#clear-markers:hover{
+  background-color: #007bff; /* Blue background */
+  color: white; /* White text */
+}
+
+#clear-markers:disabled {
+  background-color: #e0e0e0; /* Greyed out when disabled */
+  color: #0266d2; /* Blue text */
+  cursor: not-allowed;
+}
+
+#recentre-button {
+  position: absolute;
+  bottom: 80px; /* Adjust to place above fullscreen button */
+  left: 10px;   /* Align with fullscreen button on the left */
+  z-index: 999; /* Ensure it's above other controls */
+  background-color: white;
+  border: 1px solid #ccc;
+  padding: 10px;
+  border-radius: 50%; /* Circle button */
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  width: 30px;
+  box-shadow: 0 0 10px rgba(211, 211, 211, 0.7); /* Light grey outline */
+}
+
+/* Optional hover effect */
+#recentre-button:hover {
+  background-color: #f0f0f0;
+}
+
+/* Adjust icon size */
+#recentre-button i {
+  font-size: 18px;
+}
+
+#instructions {
+  position: absolute;
+  margin: 20px;
+  width: 25%;
+  top: 0;
+  bottom: 20%;
+  padding: 20px;
+  background-color: #fff;
+  overflow-y: scroll;
+  font-family: sans-serif;
+  display: none;  /*Starts off hidden*/
+  z-index: 1;
+}
+
+#toggle-instructions {
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+  background-color: #007BFF;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  z-index: 1000;
+  top: 10px;
+  left: 10px;
+  position: fixed;
+}
+
+/*Waypoint marker*/
+.waypoint-marker {
+  width: 4px; /* Adjust the size as needed */
+  height: 4px;
+  background-color: white; /* Marker fill color */
+  border: 2px solid black; /* Black border */
+  border-radius: 50%; /* Circular shape */
+  display: flex;
+  justify-content: center;
+  align-items: center; /* Center any content inside */
+}
+
+.waypoint-marker-current {
+  width: 4px; /* Adjust the size as needed */
+  height: 4px;
+  background-color: rgba(174, 48, 240, 1); /* Marker fill color */
+  border: 2px solid white; /* Black border */
+  border-radius: 50%; /* Circular shape */
+  display: flex;
+  justify-content: center;
+  align-items: center; /* Center any content inside */
+}
+
+/*Instruction tabs*/
+.tabs {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.tab-button {
+  padding: 10px;
+  background-color: #f1f1f1;
+  border: 1px solid #ccc;
+  cursor: pointer;
+  margin-right: 5px;
+}
+
+.tab-button:hover {
+  background-color: #ddd;
+}
+
+.tab-content {
+  border: 1px solid #ccc;
+  padding: 10px;
+}
+
+/* Main container styling for the triangle box */
+.container {
+  width: 50px; /* Width of the box */
+  height: 50px; /* Height of the box */
+  background-color: white; /* White background */
+  display: flex; /* Flexbox for centering contents */
+  justify-content: center; /* Center horizontally */
+  align-items: center; /* Center vertically */
+  border: 2px solid #ccc; /* Border around the box */
+  position: absolute; /* Absolute position to stay at bottom */
+  bottom: 10px; /* Space from the bottom */
+  left: 50%; /* Center horizontally on the page */
+  transform: translateX(-50%); /* Adjust for centering */
+  z-index: 10; /* Ensure it appears above the map */
+  border-radius: 5px; /* Rounded corners */
+}
+
+#triangle {
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 20px solid rgba(174, 48, 240, 1); /* Outer triangle color (purple) */
+  position: absolute;
+  top: 75%;
+  left: 50%;
+  transform: translate(-50%, -100%) rotate(0deg); /* Initial position and rotation */
+  transition: transform 0.5s ease-in-out; /* Smooth transition for position and rotation */
+}
+
+.inner-triangle {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 10px solid white; /* Inner triangle color (white) */
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, 100%) rotate(0deg);
+  transition: transform 0.5s ease-in-out; /* Smooth transition for the inner triangle as well */
+}

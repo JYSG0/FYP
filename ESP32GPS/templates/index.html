@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Display a map on a webpage</title>
+        <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+        <!-- CSS styles -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+        <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+        <!-- Mapbox CSS and JS -->
+        <link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet">
+        <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>        <!-- Geocoder -->
+        <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.min.js"></script>
+        <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.css">
+    </head>
+    <body>
+        <!-- Toggle Instructions Button -->
+        <button id="toggle-instructions">
+            <i class="fas fa-list-dots"></i>
+        </button>
+
+        <!-- Map display-->
+        <div id="map" style="position: absolute; width: 100%; height: 100%;"></div>
+
+        <!-- Search box containers -->
+        <div class="geocoder-container">
+            <div id="geocoderStart" class="mapbox-gl-geocoder"></div>
+            <div id="geocoderDestination" class="mapbox-gl-geocoder"></div>
+        </div>
+
+        <!--Button to view, start routes, clear markers and routes-->
+        <div class="search-container">
+            <button id="clear-markers">Clear Markers</button>
+            <input id="view-route" type="button" value="View Route" />
+            <input id="start-route" type="button" value="Start Route" />
+        </div>
+        <div id="current-location-display"></div>
+        <div id="destination-display"></div>
+        <button id="recentre-button">
+            <i class="fas fa-compass"></i>
+        </button>   
+
+        <!-- Compass arrow -->
+        <div class="container">
+            <div id="triangle">
+                <div class="inner-triangle"></div> <!-- Inner triangle -->
+            </div>
+        </div>          
+
+        <!-- Instructions Container -->
+        <div id="instructions" style="display: none;">
+            <div class="tabs">
+                <button class="tab-button" onclick="showTab('fullRoute')">Full Route</button>
+                <button class="tab-button" onclick="showTab('midRoute')">Mid Route</button>
+            </div>
+            
+            <!-- Full Route Tab -->
+            <div id="fullRoute" class="tab-content" style="display: block;">
+                <p id="full-route-duration"><!-- Full Route Duration will go here --></p> <!-- New Container for Full Route Duration -->
+                <ul id="instructions-list-full"></ul>
+            </div>
+            
+            <!-- Mid Route Tab -->
+            <div id="midRoute" class="tab-content" style="display: none;">
+                <p id="mid-route-duration"><!-- Mid Route Duration will go here --></p> <!-- New Container for Mid Route Duration -->
+                <ul id="instructions-list-mid"></ul>
+            </div>
+        </div>
+
+        <!-- Move the script to the end of the body -->
+        <script src="https://unpkg.com/@mapbox/polyline/polyline.min.js"></script>
+        <script src="{{ url_for('static', filename='TestMapboxPolyline.js') }}"></script> <!-- Link to the JavaScript file -->
+    </body>
+</html>
