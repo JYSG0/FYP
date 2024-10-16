@@ -1,281 +1,212 @@
-#Libraries/Plug-ins
-import machine
-import math
-import requests
 import network
+import urequests
+import requests
 import time
+import math
+import machine
 import json
-from time import localtime
+import machine
+from time import sleep, localtime
 from micropyGPS import MicropyGPS
-
-# Set up API - 250,000 requests per month
-api_key = 'SQhcQxSqNhmFGy1cf3vFZP6sUx69OuhkFrWiuHigA-E'
+from machine import I2C, Pin
+from qmc5883L import QMC5883L
 
 # Instantiate the micropyGPS object
 my_gps = MicropyGPS()
 
-# Define the UART pins and create a UART o12bject
-gps_serial = machine.UART(2, baudrate=9600, tx=26, rx=25)
+# Define the UART pins and create a UART object
+gps_serial = machine.UART(2, baudrate=9600, tx=9, rx=10)	#SD2 = GPIO 9, SD3 = GPIO 10
 
-#Temporary fixed desLatitude & desLongitude for testing/debugging
-#desLatitude = 1.31151
-#desLongitude = 103.77812
+#Define the SCL and SDA pins
+i2c = I2C(1, scl=Pin(26), sda=Pin(25), freq=100000)
+#Place pins into qmc5883 compass library file
+qmc5883 = QMC5883L(i2c)
 
-#Variables
-turning_points = []
-compassDirection = ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"]
+# Set up HERE API - 250,000 requests per month
+api_key = 'SQhcQxSqNhmFGy1cf3vFZP6sUx69OuhkFrWiuHigA-E'
+
+# Variables
 instructions = []
+turnAngle = []
+bearingWLocations = []
+distance = 0
+bearingStep = 0
+currentStep = 0
+cardinalDirections = ['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest']
 
-#Boolean checks
+# Boolean checks
 roadCurrent = False
 roadNext = False
 inBoundary = False
 route_printed = False
 calibrate = False
+matchedBearing = False
+reachedDestination = False
+deviated = False
 
-#Set up WiFi connection with esp32
-def connect():
+latitude = 1.310217
+longitude = 103.7776
+
+#Calibrate compass
+print("Calibrating... Move the sensor around.")
+x_offset, y_offset, z_offset, x_scale, y_scale, z_scale = qmc5883.calibrate()
+print("Calibration complete.")
+print(f"Offsets: X={x_offset}, Y={y_offset}, Z={z_offset}")
+print(f"Scales: X={x_scale}, Y={y_scale}, Z={z_scale}")
+
+def convert_to_sgt(utc_time):
+    hour, minute, second = utc_time
+    hour += 8  # Adjust for Singapore Time (SGT)
+    if hour >= 24:
+        hour -= 24
+    return hour, minute, second
+
+def dmm_to_dd(degrees, minutes, direction):
+    decimal_degrees = degrees + (minutes / 60)
+    if direction in ['S', 'W']:  # Southern and Western directions are negative
+        decimal_degrees = -decimal_degrees
+    return decimal_degrees
+
+# Connect to Wi-Fi
+def connect_wifi():
     ssid = 'AndroidAP3a93'
     password = 'buhh1927'
-
-    wifi = network.WLAN(network.STA_IF)
-    wifi.active(True)
-    if not wifi.isconnected():
-        print("Connecting to the network...")
-        wifi.connect(ssid, password)
-        while not wifi.isconnected():
-            pass
-    print('network config: ', wifi.ifconfig())
-
-#Menu to insert desired destination
-def menu():
-    global desLatitude, desLongitude
     
-    validChoices = ["Address", "Coordinates", "Admin"]
-    choice = None
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect(ssid, password)
     
-    while choice not in validChoices:
-        choice = input("Address or Coordinates?: ")
-        #print(f"{choice}")
-        
-        if choice == "Address":
-            addressName = input("Enter address: ")
-            addressName = addressName.replace(" ", "+")	#Replace space with '+' to fit the format in the request url
-            return choice, addressName, None, None
-        
-        elif choice == "Coordinates":
-            try:
-                desLatitude = float(input("Please input destination latitude: "))
-                desLongitude = float(input("Please input destination longitude: "))
-                print(f"Destination coordinates: {desLatitude}, {desLongitude}")
-                return choice, None, desLatitude, desLongitude
-            
-            except ValueError:
-                print("Invalid input for latitude or longitude")
-                return None, None, None, None
-            
-        elif choice == "Admin":
-            try:
-                desLatitude = 1.31158
-                desLongitude = 103.77918
-                return choice, None, desLatitude, desLongitude
-            
-            except ValueError:
-                print("Invalid input for latitude or longitude")
-                return None, None, None, None
-            
-        else:
-            print("Invalid choice")
+    while not wlan.isconnected():
+        print('Connecting to WiFi...')
+        time.sleep(1)
+    
+    print('Connected:', wlan.ifconfig())
 
-#Query HERE API to reverse geocode current location to address
-def revGeoCode(latitude, longitude):
+def send_current_coordinates_to_flask(latitude, longitude, azimuth, direction):
+    url = 'http://192.168.96.96:5500/receive_coordinates'  # Adjust the IP and Flask route as needed
     try:
-        responseUrl = f'https://revgeocode.search.hereapi.com/v1/revgeocode?at={latitude}%2C{longitude}&lang=en-US&apiKey={api_key}'
-        response = requests.get(responseUrl)
+        # Create payload with the current coordinates
+        payload = {
+            'current_latitude': latitude,
+            'current_longitude': longitude,
+            'azimuth': azimuth,
+            'direction': direction
+        }
+        #print("Payload: ", payload)	#debugging line
+        headers = {'Content-Type': 'application/json'}
+        
+        # Send POST request with current coordinates
+        response = urequests.post(url, json=payload, headers=headers)
+        
         if response.status_code == 200:
-            currentData = response.json()
-            
-            #Check if there are 'items'/attributes in response
-            if 'items' in currentData and len(currentData['items']) > 0:
-                currentAddress = currentData['items'][0]['address']['label']
-                return currentAddress
-            else:
-                print("No items")
-                
+            print("Successfully sent current coordinates to Flask.")
+            return True  # Indicate success
         else:
-            print(f"Error getting HERE API rgc: {response.status_code}")
+            print(f"Failed to send current coordinates. Status code: {response.status_code}")
+            return False  # Indicate failure
     except Exception as e:
-        print(f"Error occured while getting HERE API rgc: {e}")
-    return None
+        print('Error sending current coordinates to Flask:', e)
+        return False
 
-#Address format entered may be different for everybody so using search then taking the correct format to find correct destination format 
-def searchAddress(latitude, longitude, addressName):
-    global desLatitude, desLongitude
+def receive_coordinates_from_flask():
     try:
-        searchUrl = f'https://autosuggest.search.hereapi.com/v1/autosuggest?at={latitude}%2C{longitude}&lang=en-US&q={addressName}&country=SG&apiKey={api_key}'
-        #print(f"{searchUrl}")
-        searchResponse = requests.get(searchUrl)
-        if searchResponse.status_code == 200:
-            searchData = searchResponse.json()
-            
-            #Check if there are 'items'/attributes in response
-            if 'items' in searchData and len(searchData['items']) > 0:
-                searchAddress = searchData['items'][0]['title']
-                #print(f"Is {searchAddress} your destination?")
-                choiceAddress = input(f"Is {searchAddress} your destination? ")
-                
-                if choiceAddress == "Yes":
-                    if 'items' in searchData and len(searchData['items']) > 0:
-                        desLatitude = searchData['items'][0]['access'][0]['lat']
-                        print(f"{desLatitude}")
-                        desLongitude = searchData['items'][0]['access'][0]['lng']
-                        print(f"{desLongitude}")
-                        address = searchData['items'][0]['address']['label']
-                                
-                        return address
-                    else:
-                        print("No geocode items")
-                else:
-                    print("Address not confirmed")
-            else:
-                print("No items")
+        url = 'http://192.168.96.96:5500/get_coordinates'  # Adjust the IP as needed
+        response = urequests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            startLat = data['start_latitude']
+            startLon = data['start_longitude']
+            desLat = data['end_latitude']
+            desLon = data['end_longitude']
+            print(f"Fetched Coordinates - Start: ({startLat}, {startLon}), Destination: ({desLat}, {desLon})")
+            return startLat, startLon, desLat, desLon
         else:
-            print(f"Error getting HERE API sa: {searchResponse.status_code}")
-    except Exception as e:
-        print(f"Error occured while getting HERE API sa: {e}")
-    return None
-
-#Query HERE API to reverse geocode destination coordinates to readable address
-def desRevGeoCode(desLatitude, desLongitude):
-    try:
-        desResponseUrl = f'https://revgeocode.search.hereapi.com/v1/revgeocode?at={desLatitude}%2C{desLongitude}&lang=en-US&apiKey={api_key}'
-        desResponse = requests.get(desResponseUrl)
-        if desResponse.status_code == 200:
-            destinationData = desResponse.json()
-            
-            #Check if there are 'items'/attributes in response
-            if 'items' in destinationData and len(destinationData['items']) > 0:
-                desAddress = destinationData['items'][0]['address']['label']
-                return desAddress
-            else:
-                print("No items")
-
-        else:
-            print(f"Error getting HERE API drgc: {desResponse.status_code}")
-    except Exception as e:
-        print(f"Error occured while getting HERE API drgc: {e}")
-    return None
-
-def route(latitude, longitude, desLatitude, desLongitude):
-    routeUrl = f"https://router.hereapi.com/v8/routes?transportMode=car&origin={latitude}%2C{longitude}&destination={desLatitude}%2C{desLongitude}&return=polyline%2Cturnbyturnactions&apiKey={api_key}"
-    try:
-        routeResponse = requests.get(routeUrl)
-        if routeResponse.status_code == 200:
-            routeData = routeResponse.json()
-            #print("Route Data:", routeData)  # Debugging line
-            
-            if 'routes' in routeData and len(routeData['routes']) > 0:
-                # Return the full routeData for further processing
-                return routeData
-            else:
-                print("No routes found in response.")
-                return None
-        else:
-            print(f"Error getting route: {routeResponse.status_code}")
-            print("Error Response:", routeResponse.text)  # Print error details
+            print('Failed to fetch coordinates. Status code:', response.status_code)
             return None
     except Exception as e:
-        print(f"Error occurred while getting route: {e}")
+        print('Error fetching coordinates:', e)
         return None
 
-def decode_polyline(encoded):
-    if not isinstance (encoded, str):
-        raise TypeError("Expected a string for encoded polyline, got {}".format(type(encoded)))
-    
-    # Constants from the polyline encoding
-    ENCODING_TABLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-    DECODING_TABLE = [
-        62, -1, -1, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1,
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-        22, 23, 24, 25, -1, -1, -1, -1, 63, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
-        36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51
-    ]
-
-    def decode_char(char):
-        char_code = ord(char)
-        return DECODING_TABLE[char_code - 45]
-
-    def to_signed(val):
-        res = val
-        if res & 1:
-            res = ~res
-        return res >> 1
-
-    # Decoding the polyline
-    result = []
-    index = 0
-    length = len(encoded)
-    lat = 0
-    lng = 0
-
-    while index < length:
-        b, shift = 0, 0
-        while True:
-            char = encoded[index]
-            index += 1
-            b |= (decode_char(char) & 0x1F) << shift
-            if decode_char(char) & 0x20 == 0:
-                break
-            shift += 5
-
-        lat += to_signed(b)
-
-        b, shift = 0, 0
-        while True:
-            char = encoded[index]
-            index += 1
-            b |= (decode_char(char) & 0x1F) << shift
-            if decode_char(char) & 0x20 == 0:
-                break
-            shift += 5
-
-        lng += to_signed(b)
-
-        result.append((lat / 1e6, lng / 1e6))
-
-    return result
-
-#Process route data and extract polyline and instructions
-def process_route_data(route_data):
-    # Check if route_data is a dict
-    if not isinstance(route_data, dict):
-        print("Expected route_data to be a dict, got:", type(route_data))
-        return None
-
+def receive_turningPoints_from_flask():
     try:
-        polyline_encoded = route_data['routes'][0]['sections'][0]['polyline']
-    except (IndexError, KeyError) as e:
-        print("Failed to extract polyline:", e)
+        url = 'http://192.168.96.96:5500/get_waypoints'  # Adjust the IP as needed
+        response = urequests.get(url)
+        if response.status_code == 200:
+            turningPoints = response.json()  # Directly assign the response
+            return turningPoints  # Return the list of waypoints
+        else:
+            print('Failed to fetch coordinates. Status code:', response.status_code)
+            return None
+    except Exception as e:
+        print('Error fetching coordinates:', e)
         return None
     
-    #print("Encoded polyline:", polyline_encoded)  # Debugging line
-
-    if not isinstance(polyline_encoded, str):
-        print("Expected polyline to be a string, got:", type(polyline_encoded))
+def receive_instructions_from_flask():
+    try:
+        url = 'http://192.168.96.96:5500/get_instructions'  # Adjust the IP as needed
+        response = urequests.get(url)
+        if response.status_code == 200:
+            instructions = response.json()  # Directly assign the response
+            return instructions
+        else:
+            print('Failed to fetch coordinates. Status code:', response.status_code)
+            return None
+    except Exception as e:
+        print('Error fetching coordinates:', e)
         return None
     
-    turnByTurnActions = route_data['routes'][0]['sections'][0]['turnByTurnActions']
-    
-    # Decode polyline into coordinates
-    coordinates = decode_polyline(polyline_encoded)
-    #print("Decoded coordinates:", coordinates)  # Debugging line
-    
-    # Extract turning instructions
-    instructions = extract_instructions(turnByTurnActions, coordinates)
-    #print("Extracted instructions:", instructions)	#Debugging line -> Maybe pass to Javascript
-    
-    return coordinates, instructions
+def receive_turnAngle_from_flask():
+    try:
+        url = 'http://192.168.96.96:5500/get_turnAngle'  # Adjust the IP as needed
+        response = urequests.get(url)
+        if response.status_code == 200:
+            turnAngle = response.json()  # Directly assign the response
+            return turnAngle
+        else:
+            print('Failed to fetch coordinates. Status code:', response.status_code)
+            return None
+    except Exception as e:
+        print('Error fetching coordinates:', e)
+        return None
 
+def receive_routeBearing_from_flask():
+    try:
+        url = 'http://192.168.96.96:5500/get_bearingWLocations'  # Adjust the IP as needed
+        response = urequests.get(url)
+        if response.status_code == 200:
+            bearingWLocations = response.json()
+            return bearingWLocations
+        else:
+            print('Failed to fetch coordinates. Status code:', response.status_code)
+            return None
+    except Exception as e:
+        print('Error fetching coordinates:', e)
+        return None
+
+def compareStartBearing(instructions, directions):
+    startDir = None
+    
+    if currentStep < 1:
+        #Extract starting instruction to face start of route
+        moveToStart = instructions[0]
+        #print(moveToStart)	#debugging line
+        #Convert string to lowercase for easier matching
+        instructionLower = moveToStart.lower()
+        
+        for dir in cardinalDirections:
+            if dir in instructionLower:
+                startDir = dir	#Assign the start direction
+                
+        #print(startDir)	#debugging line
+        
+        if startDir:
+            print(f"Starting direction extracted: {startDir}")
+        else:
+            print("Starting direction not found in the instruction.")
+            return
+    
+        return startDir  
+    
 #Calucalate bearing and distance between 2 points on Earth
 def haversine_Bearing(lat1, lon1, lat2, lon2): 
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
@@ -296,197 +227,211 @@ def haversine_Bearing(lat1, lon1, lat2, lon2):
 
     return compass_bearing, distance
 
-#Identify turning points based on angle changes and distance
-def find_turning_points(coordinates, angle_threshold=50, distance_threshold=5):
-    turning_points = []
-    compass_directions = []
+def followInstructions(instructions, direction, turningPoints, currentLat, currentLon, turnAngle, threshold=5.0):
+    global currentStep, reachedDestination, turnStep
     
-    for i in range(1, len(coordinates) - 1):
-        lat1, lon1 = coordinates[i - 1]
-        lat2, lon2 = coordinates[i]
-        lat3, lon3 = coordinates[i + 1]
+    if currentStep >= len(turningPoints):
+        print("Destination reached, stop vehicle")
+        reachedDestination = True
         
-        # Calculate angles in radians
-        angle1 = math.degrees(math.atan2(lon2 - lon1, lat2 - lat1))
-        angle2 = math.degrees(math.atan2(lon3 - lon2, lat3 - lat2))
+        # Logic to stop vehicle
+        #moveVehicle(action, turnOri, angle, reachedDestination)	#Use reachedDestinaiton to stop the vehcile in moveVehicle function
         
-        # Calculate distance between previous and current point
-        bearing, distance_to_prev = haversine_Bearing(lat2, lon2, lat1, lon1)
+        return  # Exit the function once the destination is reached
+    
+    else:
+        reachedDestination = False
         
-        # Calculate change in angle
-        delta_angle = abs(angle2 - angle1)
+        print(currentStep)
+        # Fetch the current turning point based on currentStep
+        turnLon, turnLat = turningPoints[currentStep]
         
-        idx = round(bearing / 45) % 8
-        heading = compassDirection[idx]
-
-        # Debug prints
-        #print(f"Point {i}: Angle1: {angle1:.2f}, Angle2: {angle2:.2f}, Delta Angle: {delta_angle:.2f}, Distance to Prev: {distance_to_prev:.2f}")
+        # Print current coordinates and the target turning point
+        print(f"Current Location: Latitude: {currentLat}, Longitude: {currentLon}")
+        print(f"Next Turning Point: Latitude: {turnLat}, Longitude: {turnLon}")
         
-        if delta_angle > angle_threshold and distance_to_prev > distance_threshold:
-            turning_points.append((lat2, lon2))
-            compass_directions.append(heading)  # Append the heading to the list
-            #print(f"Turning point identified at: {lat2}, {lon2} with angle change: {delta_angle:.2f}° and bearing: {heading}")	#Debugging line
-
-    return compass_directions, turning_points
-
-#Extract and form readable instructions from route data actions
-def extract_instructions(turnByTurnActions, coordinates):
-    instructions = []
-    action_data = []
-
-    for action in turnByTurnActions:
-        action_data.append({
-            "action": action['action'],
-            "duration": action.get("duration"),
-            "length": action.get("length"),
-            "direction": action.get("direction"),
-            "current_road": action.get("currentRoad", {}).get("name", [{}])[0].get("value", "N/A"),
-            "next_road": action.get("nextRoad", {}).get("name", [{}])[0].get("value", "N/A")
-        })
-    for i, item in enumerate(action_data):
-        if item["action"] == "depart":
-          if len(coordinates) < 2:
-              print("Not enough coordinates to calculate bearing.")
-              continue  # or handle as needed
-
-          compass, _ = haversine_Bearing(
-              float(coordinates[0][0]), float(coordinates[0][1]), float(coordinates[1][0]), float(coordinates[1][1])
-          )
-          idx = round(compass / 45) % 8
-          next_road_name = item['next_road'] if item['next_road'] != "N/A" else "unknown road"
-          instruction = f"Head {compassDirection[idx]} and continue for {item['length']}m on {next_road_name}."
-
-        elif item["action"] == "turn":
-            direction = item.get("direction")
-            current_road_name = item['current_road'] if item['current_road'] != "N/A" else "unknown road"
-            next_road_name = item['next_road'] if item['next_road'] != "N/A" else "unknown road"
-
-            if current_road_name != "unknown road" and next_road_name != "unknown road":
-                instruction = f"Turn {direction} from {current_road_name} onto {next_road_name}. Go for {item['length']}m."
-            elif current_road_name == "unknown road":
-                instruction = f"Turn {direction} onto {next_road_name}. Go straight for {item['length']}m."
-            else:
-                instruction = f"Continue on {current_road_name} for {item['length']}m."
-
-        instructions.append(instruction)
-
-    return instructions
-
-#Compare current coordinates with turning points and return its specific action
-def compareCoordinates(current_latitude, current_longitude, turning_points, instructions, threshold=1.5):
-    closest_distance = float('inf')
-    action = "No action at this location."
-    closest_turn_point = None
-    closest_idx = -1  #To track index of closest point
-
-    for i, (turn_lat, turn_lon) in enumerate(turning_points):
-        # Calculate distance to each turning point
-        _, distance_to_turn = haversine_Bearing(current_latitude, current_longitude, turn_lat, turn_lon)
-        #print(f"Distance to turning point {i+1} at ({turn_lat}, {turn_lon}): {distance_to_turn:.2f} meters")
-
-        # Check if within the turning point threshold
+        # Calculate the distance to the current turning point
+        _, distance_to_turn = haversine_Bearing(currentLat, currentLon, turnLat, turnLon)
+        
+        #print("")
+        #print(distance_to_turn)	#debugging line
+        
         if distance_to_turn <= threshold:
-            action = f"Action: {instructions[i]} (Time to turn!)"
-            break  # Exit if within the turning point threshold
+            # We are close enough to the turning point, proceed with the action
+            action = f"Action: {instructions[currentStep]} (Time to turn!)"
+            
+            #If the instruction has the word 'Turn' in it, use turnAngle dictionary
+            if 'turn' in instructions[currentStep].lower():	#Change 'Turn' to lowercase for easier checking
+                turn = turnAngle[turnStep]
+                
+                #Fetch the elements in the current turnAngle array index
+                angle = turn['angle']
+                location = turn['location']
+                turnOri = turn['turnOri']
+                
+                action = f"{action} for {angle} degrees, {turnOri}"
+                
+                turnStep+=1	#Move to get ready fot the next turn angle
+                
+            print(action)
+            currentStep += 1  # Move to the next instruction
+        else:
+            # Not close enough to the turning point yet, keep going straight
+            action = f"Keep going straight. Distance to next turn: {distance_to_turn:.2f} meters."
+            print(action)
+            
+        #moveVehicle(action, turnOri, angle, reachedDestination)	#Function to actually move vehicle according to action
         
-        # Keep track of the closest distance
-        if distance_to_turn < closest_distance:
-            closest_distance = distance_to_turn
-            closest_turn_point = (turn_lat, turn_lon)
-            closest_idx = i+1  # Save the index of the closest point
+    return currentStep, reachedDestination
 
-    if action == "No action at this location.":
-        print("")
-        print(f"Closest distance to turning point {closest_idx} in {closest_distance:.2f} meters")
+def checkDeviation(currentLat, currentLon, azmiuth, bearingWLocations, deviated, deviationStart = None, prevDistance = None):
+    global bearingStep
     
-    if closest_turn_point is not None and distance <= threshold:
-        print("")
-        print(f"Distance to turning point {closest_idx} at ({turn_lat}, {turn_lon}): {distance_to_turn:.2f} meters")
+    bearings = [item['bearing'] for item in bearingWLocations]	#Extract bearings from bearingWLocations
+    location = [item['locations'] for item in bearingWLocations]	#Extract location of bearings from bearingWLocations
+    
+    if bearingStep >= len(bearings):
+        print("Destination reached, stop vehicle")
+        
+        #Logic to stop vehicle
+    else:
+        print(bearingStep)
+        
+        #Thresholds
+        bearingThreshold = 5	#Degrees
+        distanceThreshold = 5 #Metres
+        
+        #Fetch the current bearing points based on bearingStep
+        targetLon, targetLat = location[bearingStep]
+        
+        #Print currentlocation and target points
+        print(f"Current Location: Latitude: {currentLat}, Longitude: {currentLon}")
+        print(f"Bearing Location to note: Latitude: {targetLat}, Longitude: {targetLon}")
+        
+        #Calculate distance from 
+        _, distanceToTarget = haversine_Bearing(currentLat, currentLon, targetLat, targetLon)
+        
+        #If the distance decreases, it means it hasn't passed. If the distance increases, it means it has passed
+        
+        if prevDistance is not None and distanceToTarget > prevDistance:
+            print(f"Vehicle passed target {bearingStep}. Move to next target")
+            bearingStep+=1
+            prevDistance = None
+        else:
+            prevDistance = distanceToTarget
+        
+        bearingDiff = abs(azimuth - bearings[bearingStep])
+        
+        if distanceToTarget <= distanceThreshold and bearingDiff <= bearingThreshold:
+            deviated = False
+            print(f"On course to target {bearingStep}, {targetLat}, {targetLon}")
+        
+        if distanceToTarget > distanceThreshold and bearingDiff > bearingThreshold:
+            deviated = True
+            print(f"Deviation detected from target {bearingStep}")
+            deviationStart = time.time()
+            
+    return deviationStart, deviated, bearingStep, prevDistance
 
-    return action
+def reOrientateVehicle(azimuth, bearingWLocations, deviationStart, bearingStep, currentLat, currentLon):
+    #Nearest bearing and location
+    nearestBearing = bearingWLocations[bearingStep]['bearing']
+    nearestLocation = bearingWLocations[bearingStep]['locations']
+    targetLon, targetLat = nearestLocation
+    
+    #Calculate bearing difference
+    bearingDiff = abs(azimuth - nearestBearing)
+    
+    if bearingDiff > 180:
+        bearingDiff = 360 - bearingDiff
+    
+    #Determine left or right
+    if azimuth < nearestBearing:
+        turnDirection = "right"
+    else:
+        turnDirection = "left"
+        
+    # Calculate the time duration for turning (you can adjust the factor here)
+    turningDuration = bearingDiff / 2  # Assuming 1 degree takes 1 second to turn
+    reOriTime = turningDuration  # Set countdown timer to the calculated duration
+    
+    startTime = time.time()  # Capture the starting time for reorientation
 
-#===========================================================================================================================================================#
+    # Countdown timer while reOrientation time is greater than 0
+    while reOriTime > 0:
+        currentTime = time.time()
+        elapsedTime = currentTime - startTime
+        reOriTime = turningDuration - elapsedTime  # Update remaining time
+        
+        if reOriTime < 0:
+            reOriTime = 0  # Ensure it doesn't go below zero
+        
+        print(f"Turning {turnDirection} by {bearingDiff} degrees. Time remaining: {reOriTime:.2f} seconds")
+        
+        # Logic to turn vehicle in the direction (adjust servo motors, etc.)
 
-#Connect to WiFi
-connect()
-
-#Call menu function
-choice, addressName, desLatitude, desLongitude = menu()
-
-# Main loop to fetch data and use HERE API
-while True:
-    try:
-        while gps_serial.any():
-            data = gps_serial.read()
-            for byte in data:
-                stat = my_gps.update(chr(byte))
-                if stat is not None:
-                    if my_gps.satellites_in_use > 0:  # Indicates a valid fix
-                        latitude = my_gps.latitude[0] + my_gps.latitude[1] / 60
-                        longitude = my_gps.longitude[0] + my_gps.longitude[1] / 60
-                        latitude = round(latitude, 6)
-                        longitude = round(longitude, 6)
-
-                        # Print parsed GPS data
-                        local_time = localtime()  # Get local time
-                        print(f"Local Time (SG): {local_time[3]:02d}:{local_time[4]:02d}:{local_time[5]:02d}")
-                        print('Date:', my_gps.date_string('long'))
-                        print('Latitude:', latitude)
-                        print('Longitude:', longitude)
-                        #print('Altitude:', my_gps.altitude)
-                        #print('Satellites in use:', my_gps.satellites_in_use)
-                        print('Horizontal Dilution of Precision:', my_gps.hdop)
+    # Logic to finish the turn and orient the vehicle to the original bearing
+    print("Reorientation complete. Vehicle should be back on course.")
+    
+# Main loop
+def main():
+    connect_wifi()
+    
+    global matchedBearing  # Declare matchedBearing as global
+    matchedBearing = False  # Initialize it to False at the start
+    
+    while True:
+        try:
+            while gps_serial.any():
+                data = gps_serial.read()
+                for byte in data:
+                    stat = my_gps.update(chr(byte))
+                    if stat is not None:
+                        # Compass
+                        x, y, z, _ = qmc5883.read_raw()  # Read raw values of compass
+                        x_calibrated, y_calibrated, z_calibrated = qmc5883.apply_calibration(x, y, z)  # Calibrated values from offset and scale
+                        azimuth = qmc5883.calculate_azimuth(x_calibrated, y_calibrated)
+                        direction = qmc5883.get_cardinal_direction(azimuth)
                         
-                        if not route_printed:
-                            # Handle destination queries
-                            if choice == "Address" and addressName:
-                                destination = searchAddress(latitude, longitude, addressName)
-                                if destination:
-                                    print("Address: ", destination)
-                                else:
-                                    print("Searching for address...")
-                            elif choice == "Coordinates" and desLatitude and desLongitude:
-                                destination = desRevGeoCode(desLatitude, desLongitude)
-                                if destination:
-                                    print("Destination: ", destination)
-                                else:
-                                    print("Error getting rev geocode destination")
+                        #GPS logic
                         
-                            location = revGeoCode(latitude, longitude)
-                        
-                            if location:
-                                print("Location: ", location)
-                                if not calibrate:
-                                    choiceCoordinates = input(f"Is {location} your starting location? ")
-                                    
-                                    while choiceCoordinates != "Yes" :
-                                            calibrate = True
-                                            latitude = input(f"Please input your current latitude: ")
-                                            longitude = input(f"Please input your current longitude: ")
-                                            location = revGeoCode(latitude, longitude)
-                                            choiceCoordinates = input(f"Is {location} your starting location? ")
-     
-                            else:
-                                print("Error getting rev geocode location")
-                        
-                            turnByTurnActions = route(latitude, longitude, desLatitude, desLongitude)
+                        send_current_coordinates_to_flask(latitude, longitude, azimuth, direction)
+                        startLat, startLon, desLatitude, desLongitude = receive_coordinates_from_flask()
 
-                            if turnByTurnActions:  # Check if valid actions were returned
-                                # Call directions with the entire route data for debugging                         
-                                coordinates, instructions = process_route_data(turnByTurnActions)  # Adjust this line
-                                compass_directions, turning_points = find_turning_points(coordinates)
-                                for instruction in instructions:  # Print each instruction
-                                    #print("Action: ", instruction)
-                                    route_printed = True
+                        if desLatitude and desLongitude:
+                            turningPoints = receive_turningPoints_from_flask()
+                            turnAngle = receive_turnAngle_from_flask()
+                            instructions = receive_instructions_from_flask()
+                            bearingWLocations = receive_routeBearing_from_flask()	#Should contain both routeBearings and routeBearingsLocations
+                            
+                            if turningPoints and instructions and turnAngle:
+                                currentStep = 0
+                                bearingStep = 0
                                 
-                            # Call the compareCoordinates function with inputs and print the result
-                        action = compareCoordinates(latitude, longitude, turning_points, instructions)
-                        print(" ")
-                        print(action)
-                        
-                        time.sleep(1)
-                    
-                    else:
-                        print("Waiting for GPS fix...")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+                                startDir = compareStartBearing(instructions, direction)
+                                
+                                print(f"Current direction: {direction}, Target direction: {startDir}")
+                                if startDir == direction:
+                                    print("Direction matches! Stop turning.")
+                                    matchedBearing = True  # Update matchedBearing
+
+                                elif(currentStep < 1):
+                                    print("Keep turning! Direction not matched yet")
+                                    
+                                if matchedBearing:
+                                    print(f"matchedBearing: ", matchedBearing)
+                                    print(f"turning points: ", turningPoints)
+                                    currentStep, reachedDestination = followInstructions(instructions, direction, turningPoints, latitude, longitude, turnAngle)
+                                else:
+                                    print(f"No instructions to follow yet")
+                                
+                                deviationStart, deviated, bearingStep, prevDistance = checkDeviation(latitude, longitude, azmiuth, bearingWLocations, deviated)
+                                
+                                if deviated:
+                                    reOrientateVehicle(azimuth, bearingWLocations, deviationStart, bearingStep, latitude, longitude)
+                                
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            
+# Run the main loop
+main()
