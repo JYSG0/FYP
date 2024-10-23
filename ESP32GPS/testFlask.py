@@ -1,9 +1,8 @@
 from flask import Flask, render_template, jsonify, request
-import requests
 
 app = Flask(__name__)
 
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+#app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 #Initialise current coordinates
 current_coordinates = {
@@ -29,16 +28,19 @@ intendedDir = []
 bearingWLocations = []
 turnAngle = []
 
+#Initialise int
+currentStep = 0
+
 @app.route('/')
 def map():
     return render_template('index.html')
 
-@app.route('/coordinates', methods=['GET'])
+@app.route('/coordinates', methods=['GET']) #For client to get current_coordinates
 def get_coordinates():
-    return jsonify(current_coordinates)
+    return jsonify(current_coordinates) #Also contains azimuth and user direction
 
 
-@app.route('/receive_coordinates', methods=['POST'])
+@app.route('/receive_coordinates', methods=['POST'])    #Esp32 sends to flask
 def receive_coordinates():
     global current_coordinates
     data = request.get_json()
@@ -64,9 +66,9 @@ def receive_coordinates():
         return jsonify({'status': 'error', 'message': f'Error processing data: {str(e)}'}), 400
 
 
-@app.route('/update_coordinates', methods=['POST'])
+@app.route('/update_coordinates', methods=['POST']) #JS sends start and end to flask
 def update_coordinates():
-    global current_coordinates
+    global location_coordinates
     data = request.get_json()
     
     if data is not None:
@@ -137,28 +139,6 @@ def get_instructions_for_esp32():
     """Endpoint for ESP32 to get instructions"""
     return jsonify(instructions)  # Return the instructions
 
-
-@app.route('/update_intendedDir', methods=['POST'])
-def update_intendedDir():
-    global intendedDir
-    data = request.get_json()
-    
-    if data is not None:
-        try:
-            intendedDir = data.get('intendedDir', [])  # Update the global waypoints variable
-            print(f"Received intendedDir: {intendedDir}")  # Log received waypoints
-            return jsonify({'status': 'success', 'message': 'Coordinates updated.'}), 200
-        except (KeyError, ValueError) as e:
-            return jsonify({'status': 'error', 'message': f'Error processing data: {str(e)}'}), 400
-    
-    return jsonify({'status': 'error', 'message': 'No data received.'}), 400
-
-@app.route('/get_intendedDir', methods=['GET'])
-def get_intendedDir_for_esp32():
-    """Endpoint for ESP32 to get intendedDir"""
-    return jsonify(intendedDir)  # Return the instructions
-
-
 @app.route('/update_turnAngle', methods=['POST'])
 def update_turnAngle():
     global turnAngle
@@ -200,5 +180,27 @@ def get_bearingWLocations_for_esp32():
     """Endpoint for ESP32 to get bearingWLocations"""
     return jsonify(bearingWLocations)  # Return the instructions
 
+
+@app.route('/currentStep', methods=['GET'])
+def get_currentStep():
+    return jsonify(currentStep)
+
+@app.route('/receive_currentStep', methods=['POST'])
+def receive_currentStep():
+    global currentStep
+    data = request.get_json()
+
+    if not data or 'currentStep' not in data:
+        return jsonify({"error": "Invalid input"}), 400  # Bad request
+
+    try:
+        currentStep = data['currentStep']
+
+        #print(f"Received coordinates: {current_latitude}, {current_longitude}")    #debugging line
+        return jsonify({'status': 'success', 'message': 'Current coordinates received.', 'updated_coordinates': current_coordinates}), 200
+    except (KeyError, ValueError) as e:
+        return jsonify({'status': 'error', 'message': f'Error processing data: {str(e)}'}), 400
+
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5500)  # Listen on all interfaces
+    app.run(host='0.0.0.0', port=5501, debug=True)
