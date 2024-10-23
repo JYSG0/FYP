@@ -2,14 +2,16 @@
 <html>
     <head>
         <meta charset="utf-8">
-        <title>Display a map on a webpage</title>
+        <!-- Title of webpage -->
+        <title>J.A.M.A.R.</title>
         <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
         <!-- CSS styles -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
         <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
         <!-- Mapbox CSS and JS -->
         <link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet">
-        <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>        <!-- Geocoder -->
+        <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>        
+        <!-- Mapbox geocoder -->
         <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.min.js"></script>
         <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.3/mapbox-gl-geocoder.css">
     </head>
@@ -34,41 +36,65 @@
             <input id="view-route" type="button" value="View Route" />
             <input id="start-route" type="button" value="Start Route" />
         </div>
-        <div id="current-location-display"></div>
-        <div id="destination-display"></div>
+
+        <!--Recentre to location button-->
         <button id="recentre-button">
             <i class="fas fa-compass"></i>
-        </button>   
+        </button>
+        
+        <!--Travel type button-->
+        <div class="travel-type">
+            <button id="travel-type-car">
+                <i class="fas fa-car"></i>
+            </button>
+            <button id="travel-type-walking">
+                <i class="fas fa-walking"></i>
+            </button>
+        </div>
 
         <!-- Compass arrow -->
-        <div class="container">
+        <div class="compass-container">
             <div id="triangle">
-                <div class="inner-triangle"></div> <!-- Inner triangle -->
+                <!-- Inner triangle -->
+                <div class="inner-triangle"></div>
             </div>
-        </div>          
+            <div id="cardinal-directions">
+                <div class="direction north">N</div>
+                <div class="direction south">S</div>
+                <div class="direction east">E</div>
+                <div class="direction west">W</div>
+            </div>
+        </div>
 
         <!-- Instructions Container -->
         <div id="instructions" style="display: none;">
             <div class="tabs">
-                <button class="tab-button" onclick="showTab('fullRoute')">Full Route</button>
-                <button class="tab-button" onclick="showTab('midRoute')">Mid Route</button>
+                <button class="tab-button tab-button-active" onclick="showTab('fullRoute')">Full Route</button>
+                <button class="tab-button tab-button-inactive" onclick="showTab('midRoute')">Mid Route</button>
+                <button id="shuffle-instr">
+                    <i class="fas fa-random"></i>
+                </button>
             </div>
             
             <!-- Full Route Tab -->
             <div id="fullRoute" class="tab-content" style="display: block;">
-                <p id="full-route-duration"><!-- Full Route Duration will go here --></p> <!-- New Container for Full Route Duration -->
+                <!-- Full Route Duration will go here -->
+                <p id="full-route-duration"></p> 
+                <!-- New Container for Full Route Duration -->
                 <ul id="instructions-list-full"></ul>
             </div>
             
             <!-- Mid Route Tab -->
             <div id="midRoute" class="tab-content" style="display: none;">
-                <p id="mid-route-duration"><!-- Mid Route Duration will go here --></p> <!-- New Container for Mid Route Duration -->
+                <!-- Mid Route Duration will go here -->
+                <p id="mid-route-duration"></p> 
+                <!-- New Container for Mid Route Duration -->
                 <ul id="instructions-list-mid"></ul>
             </div>
         </div>
 
         <!-- Move the script to the end of the body -->
         <script src="https://unpkg.com/@mapbox/polyline/polyline.min.js"></script>
-        <script src="{{ url_for('static', filename='GPS.js') }}"></script> <!-- Link to the JavaScript file -->
+        <script src="{{ url_for('static', filename='TestMapboxPolyline.js') }}"></script> <!-- Link to the JavaScript file -->
     </body>
 </html>
