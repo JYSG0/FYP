@@ -7,7 +7,6 @@ import time
 import math
 import machine
 import json
-import machine
 from time import sleep, localtime
 from micropyGPS import MicropyGPS
 from machine import I2C, Pin
@@ -27,6 +26,9 @@ qmc5883 = QMC5883L(i2c)
 #Set up HERE API - 250,000 requests per month
 api_key = 'SQhcQxSqNhmFGy1cf3vFZP6sUx69OuhkFrWiuHigA-E'
 
+ip = '192.168.229'
+wsUrl = f"ws://{ip}.96:5501/socket"
+
 #Variables
 instructions = []
 turnAngle = []
@@ -34,6 +36,7 @@ bearingWLocations = []
 distance = 0
 bearingStep = 0
 currentStep = 0
+turnStep = 0
 cardinalDirections = ['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest']
 
 #Boolean checks
@@ -46,8 +49,8 @@ matchedBearing = False
 reachedDestination = False
 deviated = False
 
-latitude = 1.310217
-longitude = 103.7776
+latitude = 1.30986
+longitude = 103.778
 
 #Calibrate compass
 print("Calibrating... Move the sensor around.")
@@ -84,8 +87,16 @@ def connect_wifi():
     
     print('Connected:', wlan.ifconfig())
 
+def reset_coordinates():
+    global startLat, startLon, desLatitude, desLongitude  # Ensure to declare them as global
+    startLat = 0.0  # or your desired initial value
+    startLon = 0.0  # or your desired initial value
+    desLatitude = 0.0    # or your desired initial value
+    desLongitude = 0.0    # or your desired initial value
+    print(f"Coordinates reset to Start: ({startLat}, {startLon}), Destination: ({desLatitude}, {desLongitude})")
+
 def send_current_coordinates_to_flask(latitude, longitude, azimuth, direction):
-    url = 'http://192.168.96.96:5500/receive_coordinates'  #Adjust the IP and Flask route as needed
+    url = f'http://{ip}.96:5500/receive_coordinates'  #Adjust the IP and Flask route as needed
     try:
         #Create payload with the current coordinates
         payload = {
@@ -112,7 +123,7 @@ def send_current_coordinates_to_flask(latitude, longitude, azimuth, direction):
 
 def receive_coordinates_from_flask():
     try:
-        url = 'http://192.168.96.96:5500/get_coordinates'  #Adjust the IP as needed
+        url = f'http://{ip}.96:5500/get_coordinates'  #Adjust the IP as needed
         response = urequests.get(url)
         if response.status_code == 200:
             data = response.json()
@@ -131,7 +142,7 @@ def receive_coordinates_from_flask():
 
 def receive_turningPoints_from_flask():
     try:
-        url = 'http://192.168.96.96:5500/get_waypoints'  #Adjust the IP as needed
+        url = f'http://{ip}.96:5500/get_waypoints'  #Adjust the IP as needed
         response = urequests.get(url)
         if response.status_code == 200:
             turningPoints = response.json()  #Directly assign the response
@@ -145,7 +156,7 @@ def receive_turningPoints_from_flask():
     
 def receive_instructions_from_flask():
     try:
-        url = 'http://192.168.96.96:5500/get_instructions'  #Adjust the IP as needed
+        url = f'http://{ip}.96:5500/get_instructions'  #Adjust the IP as needed
         response = urequests.get(url)
         if response.status_code == 200:
             instructions = response.json()  #Directly assign the response
@@ -159,7 +170,7 @@ def receive_instructions_from_flask():
     
 def receive_turnAngle_from_flask():
     try:
-        url = 'http://192.168.96.96:5500/get_turnAngle'  #Adjust the IP as needed
+        url = f'http://{ip}.96:5500/get_turnAngle'  #Adjust the IP as needed
         response = urequests.get(url)
         if response.status_code == 200:
             turnAngle = response.json()  #Directly assign the response
@@ -173,7 +184,7 @@ def receive_turnAngle_from_flask():
 
 def receive_routeBearing_from_flask():
     try:
-        url = 'http://192.168.96.96:5500/get_bearingWLocations'  #Adjust the IP as needed
+        url = f'http://{ip}.96:5500/get_bearingWLocations'  #Adjust the IP as needed
         response = urequests.get(url)
         if response.status_code == 200:
             bearingWLocations = response.json()
@@ -184,6 +195,54 @@ def receive_routeBearing_from_flask():
     except Exception as e:
         print('Error fetching coordinates:', e)
         return None
+
+#Use websocket?
+def send_currentStep_to_flask(currentStep):
+    try:
+        #Open a websocket connecion
+        ws = websocket.WebSocket()
+        ws.connect(wsUrl)
+        
+        #Create payload with currentStep
+        payload = {
+            'type': 'currentStep',
+            'currentStep': currentStep,
+        }
+        
+        #Send payload as JSON string via websocket
+        ws.send(json.dumps(payload))
+        print("Successfully sent current step via websocket.")
+        
+        #Close websocket connection
+        ws.close()
+        
+        return True  # Indicate success
+    except Exception as e:
+        print('Error sending current step via WebSocket:', e)
+        return False  # Indicate failure
+    
+def send_currentStep_to_flask(currentStep):
+    url = f'http://{ip}.96:5500/receive_currentStep'  #Adjust the IP and Flask route as needed
+    try:
+        #Create payload with the current coordinates
+        payload = {
+            'currentStep': currentStep,
+        }
+        #print("Payload: ", payload)	#debugging line
+        headers = {'Content-Type': 'application/json'}
+        
+        #Send POST request with current coordinates
+        response = urequests.post(url, json=payload, headers=headers)
+        
+        if response.status_code == 200:
+            print("Successfully sent current step to Flask.")
+            return True  #Indicate success
+        else:
+            print(f"Failed to send current step. Status code: {response.status_code}")
+            return False  #Indicate failure
+    except Exception as e:
+        print('Error sending current step to Flask:', e)
+        return False
 
 def compareStartBearing(instructions, directions):
     startDir = None
@@ -255,8 +314,8 @@ def followInstructions(instructions, direction, turningPoints, currentLat, curre
         #Calculate the distance to the current turning point
         _, distance_to_turn = haversine_Bearing(currentLat, currentLon, turnLat, turnLon)
         
-        #print("")
-        #print(distance_to_turn)	#debugging line
+        print("")
+        print(distance_to_turn)	#debugging line
         
         if distance_to_turn <= threshold:
             #We are close enough to the turning point, proceed with the action
@@ -276,8 +335,11 @@ def followInstructions(instructions, direction, turningPoints, currentLat, curre
                 turnStep+=1	#Move to get ready fot the next turn angle
                 
             print(action)
+            
+            send_currentStep_to_flask(currentStep)
+            
             currentStep += 1  #Move to the next instruction
-        else:
+        elif currentStep > 0:
             #Not close enough to the turning point yet, keep going straight
             action = f"Keep going straight. Distance to next turn: {distance_to_turn:.2f} meters."
             print(action)
@@ -286,7 +348,7 @@ def followInstructions(instructions, direction, turningPoints, currentLat, curre
         
     return currentStep, reachedDestination
 
-def checkDeviation(currentLat, currentLon, azmiuth, bearingWLocations, deviated, deviationStart = None, prevDistance = None):
+def checkDeviation(currentLat, currentLon, azimuth, bearingWLocations, deviated, deviationStart = None, prevDistance = None):
     global bearingStep
     
     bearings = [item['bearing'] for item in bearingWLocations]	#Extract bearings from bearingWLocations
@@ -378,6 +440,7 @@ def reOrientateVehicle(azimuth, bearingWLocations, deviationStart, bearingStep, 
 #Main loop
 def main():
     connect_wifi()
+    reset_coordinates()
     
     global matchedBearing  #Declare matchedBearing as global
     matchedBearing = False  #Initialize it to False at the start
@@ -394,37 +457,9 @@ def main():
                         x_calibrated, y_calibrated, z_calibrated = qmc5883.apply_calibration(x, y, z)  #Calibrated values from offset and scale
                         azimuth = qmc5883.calculate_azimuth(x_calibrated, y_calibrated)
                         direction = qmc5883.get_cardinal_direction(azimuth)
-                        
+                                                
                         #GPS logic
-                        utc_time = (int(my_gps.timestamp[0]), int(my_gps.timestamp[1]), int(my_gps.timestamp[2]))  # hour, minute, second
-                        sgt_time = convert_to_sgt(utc_time)
-
-                        # Get latitude and longitude
-                        latitude_str = my_gps.latitude_string()
-                        longitude_str = my_gps.longitude_string()
-
-                        # Parse latitude
-                        lat_deg = int(latitude_str.split('°')[0])
-                        lat_min = float(latitude_str.split('°')[1].split("'")[0])
-                        lat_dir = latitude_str[-1]  # Get direction (N/S)
-
-                        # Parse longitude
-                        lon_deg = int(longitude_str.split('°')[0])
-                        lon_min = float(longitude_str.split('°')[1].split("'")[0])
-                        lon_dir = longitude_str[-1]  # Get direction (E/W)
-
-                        # Convert to decimal degrees
-                        latitude = dmm_to_dd(lat_deg, lat_min, lat_dir)
-                        longitude = dmm_to_dd(lon_deg, lon_min, lon_dir)
-                        
-                        # Print parsed GPS data
-                        print('UTC Timestamp:', my_gps.timestamp)
-                        print('Date:', my_gps.date_string('long'))
-                        print('Latitude (DD):', latitude)
-                        print('Longitude (DD):', longitude)
-                        print('Horizontal Dilution of Precision:', my_gps.hdop)
-                        print()
-                        
+                            
                         send_current_coordinates_to_flask(latitude, longitude, azimuth, direction)
                         startLat, startLon, desLatitude, desLongitude = receive_coordinates_from_flask()
 
@@ -445,20 +480,20 @@ def main():
                                     print("Direction matches! Stop turning.")
                                     matchedBearing = True  #Update matchedBearing
 
-                                elif(currentStep < 1):
+                                elif(currentStep < 1 or matchedBearing == False):
                                     print("Keep turning! Direction not matched yet")
                                     
                                 if matchedBearing:
                                     print(f"matchedBearing: ", matchedBearing)
-                                    print(f"turning points: ", turningPoints)
+                                    #print(f"turning points: ", turningPoints)
                                     currentStep, reachedDestination = followInstructions(instructions, direction, turningPoints, latitude, longitude, turnAngle)
                                 else:
                                     print(f"No instructions to follow yet")
                                 
-                                deviationStart, deviated, bearingStep, prevDistance = checkDeviation(latitude, longitude, azmiuth, bearingWLocations, deviated)
+                                #deviationStart, deviated, bearingStep, prevDistance = checkDeviation(latitude, longitude, azimuth, bearingWLocations, deviated)
                                 
-                                if deviated:
-                                    reOrientateVehicle(azimuth, bearingWLocations, deviationStart, bearingStep, latitude, longitude)
+                                #if deviated:
+                                 #   reOrientateVehicle(azimuth, bearingWLocations, deviationStart, bearingStep, latitude, longitude)
                         
                         time.sleep(0.5)	#delay to not overwhelm esp32
     
