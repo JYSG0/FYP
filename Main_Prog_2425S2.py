@@ -1,11 +1,11 @@
 import cv2
 import os
-#from ultralytics import YOLO
+from ultralytics import YOLO
 import odrive
 import Jetson.GPIO as GPIO
 import pygame
 from ultralytics import YOLO
-
+from collections import Counter
  
 
 # Function to find and connect to ODrive
@@ -20,46 +20,57 @@ def connect_to_odrive():
         print("Error connecting to ODrive:", e)
         exit()
 
-def Detect(threshold, allowed_classes):
-    global people_detected
-    global chair_detected
-    global people_count
-    global chair_count
-    people_count = 0
-    chair_count = 0 
-    # Access the detections
-    annotated_frame = results[0].boxes  # Get bounding boxes
-
-    # Check if any objects are detected
-    if annotated_frame is not None and len(annotated_frame) > 0:
-        for box in annotated_frame.data.tolist():  # Convert tensor to list            
-            class_id = int(box[5])  # Index for class ID
-            confidence = box[4]      # Index for confidence
-            # Check if the detected class is in the allowed classes
-            if (allowed_classes is None or class_id in allowed_classes) and confidence > threshold:
-                if class_id == 0:  # Assuming 0 is the class ID for people
-                    people_count += 1
-                    people_detected = True
-
-                if class_id == 56:  # Assuming 56 is the class ID for chairs
-                    chair_count += 1
-                    chair_detected = True
-        # Print appropriate messages based on the counts
-        if people_count > 0:
-            print(f"Detected {people_count} people.")
-        elif chair_count > 0:
-            print(f"Detected {chair_count} chairs.")        
-        return people_count, chair_count
-    
-    else:
-        people_detected = False
-        chair_detected = False
-
-people_detected = False
-chair_detected = False
-# Connect to ODrive
+#Connect to ODrive
 odrv0 = connect_to_odrive()
 
+
+def Manual_drive(keys):
+         # 'e' key to start motor
+        if keys[pygame.K_e]:  
+            print("Starting...")
+            odrv0.axis0.requested_state = 8  # Reactivate ODrive
+            odrv0.axis1.requested_state = 8 # Reactivate ODrive
+
+        # 'q' is pressed
+        elif keys[pygame.K_q]:  # 'q' key to restart motor
+            print("Resetting...")
+            odrv0.axis1.controller.input_pos = 0
+            odrv0.axis1.requested_state = 3  # Set ODrive to idle state
+            odrv0.axis0.controller.input_pos = 0
+            odrv0.axis0.requested_state = 3  # Set ODrive to idle state
+
+        # 'w' key to move forward
+        if keys[pygame.K_w]:
+            odrv0.axis1.controller.input_pos += 0.1
+            odrv0.axis0.controller.input_pos -= 0.1
+            print ('FORWARD')
+        # 's' key to move backwards
+        if keys[pygame.K_s]:
+            odrv0.axis1.controller.input_pos -= 0.1
+            odrv0.axis0.controller.input_pos += 0.1
+            print ('BACKWARD')
+        #'a' is pressed
+        if keys[pygame.K_a]:  # Steer Left
+            GPIO.output(pwm, GPIO.LOW)
+            GPIO.output(steering, GPIO.HIGH)
+            print ('LEFT')
+            Steering = True
+        #'d' is pressed
+        if keys[pygame.K_d]:  # Steer Right
+            GPIO.output(pwm, GPIO.LOW)
+            GPIO.output(steering, GPIO.LOW) 
+            print('RIGHT')
+            Steering = True
+        if not keys[pygame.K_a] and not keys[pygame.K_d]:  # Joystick IDLE
+            GPIO.output(pwm, GPIO.HIGH)
+            GPIO.output(steering, GPIO.HIGH)
+            Steering = False
+
+
+def Lane():
+    lane =+ 1
+def Auto():
+    auto =+ 1
 # Initialize pygame
 pygame.init()
 
@@ -72,6 +83,7 @@ GPIO.setup([pwm, steering], GPIO.OUT, initial=GPIO.LOW)
 
 # Define window size (To capture events)
 screen = pygame.display.set_mode((640,480))
+
 # Display drive voltage
 print("ODrive Voltage:", odrv0.vbus_voltage)
 
@@ -107,38 +119,73 @@ else:
 recording = False
 out = None
 
+# Initialize a flag for Lane assist, autot driving , run _detection
+run_detection = True
+Auto_driving = True
+Steering = False
 # Load the YOLOv8 model (YOLOv8s model used here; you can choose a different one)
-model = YOLO('yolov8s.pt')
+model = YOLO('best.pt')
 
 # Loop to capture, detect, and control recording
 while cap.isOpened():
     ret, frame = cap.read()  # Capture frame-by-frame
     if ret:
-                # Handle event queue
+        # Handle event queue
         pygame.event.pump()
         keys = pygame.key.get_pressed()
+        if run_detection:
+            results = model(frame, conf=0.5, verbose=False, device=0) #Running detection
+            annotated_frame = results[0].plot() # Annotate the frame with bounding boxes and labels
+                                # Print class names for each detection
+            for result in results:
+                class_ids = result.boxes.cls.tolist()
+                class_names = [model.names[int(id)] for id in class_ids]  # Map IDs to names
 
-        # YOLOv8 object detection
-        threshold = 0.5 # conf threshold
-        people = [0] #class id of people
-        chair = [56] #class id of chair
-            
-        results = model(frame, conf=threshold, verbose=False) #Running detection
-        # Annotate the frame with bounding boxes and labels
-        annotated_frame = results[0].plot()
-        Detect(threshold, people)
-        Detect(threshold, chair)
+    
+            # Use Counter to count occurrences of each class name
+            class_counts = Counter(class_names)
+            # Print the count for each class detected
+            for class_name, count in class_counts.items():
+                print(f"{count} {class_name} detected.")
+        else:
+            results = model(frame, conf=0.5, verbose=False, device=0) #Running detection
+            annotated_frame = results[0].plot()
 
-        if people_detected == True:
-            odrv0.axis1.controller.input_pos == 0
-            odrv0.axis0.controller.input_pos == 0
         # Display the annotated frame
         cv2.imshow('YOLOv8 Detection', annotated_frame)
+
+
+        
+        if Auto_driving and not keys[pygame.K_m]:
+            Auto()
+            Lane()
+            if 4 in class_ids or 8 in class_ids:            
+                print ("Stop")
+                Auto_driving = False
+                run_detection = False
+                continue
+            
+        elif not Auto_driving and not keys[pygame.K_m]:
+            Manual_drive(keys)
+            
+
+        elif keys[pygame.K_m]:
+            print("Override")
+            Auto_driving = True
+            run_detection = True
 
         # If recording, write the frame to the video output file
         if recording:
             out.write(annotated_frame)
 
+        # Break the loop if 'ESC'
+        elif keys[pygame.K_ESCAPE]:  # ESC to exit and restart motor
+            print("Exiting...")
+            odrv0.axis1.controller.input_pos = 0
+            odrv0.axis1.requested_state = 3  # Set ODrive to idle state
+            odrv0.axis0.controller.input_pos = 0
+            odrv0.axis0.requested_state = 3  # Set ODrive to idle state
+            break
         # 'r' key to start/stop video recording
         if keys[pygame.K_r]:
             if not recording:
@@ -155,62 +202,23 @@ while cap.isOpened():
                 vid_counter += 1
                 out.release()  # Stop recording and release the output file
 
+        # Break the loop if 'ESC'
+        elif keys[pygame.K_l]:  # ESC to exit and restart motor
+            print("Status:")
+            print ("Auto:",[{Auto_driving}])
+            print ("Detection:",[{run_detection}])
+            print ("recording:",[{recording}])
+
         # 't' key to capture an image
         elif keys[pygame.K_t]:
             img_name = os.path.join(output_image_dir, f"opencv_frame_{img_counter}.png")  # Set image name
             cv2.imwrite(img_name, annotated_frame)  # Write image file
             print(f"{img_name} written!")
             img_counter += 1
+        
+        cv2.waitKey(1)
 
-        # 'e' key to start motor
-        elif keys[pygame.K_e]:  
-            print("Starting...")
-            odrv0.axis0.requested_state = 8  # Reactivate ODrive
-            odrv0.axis1.requested_state = 8 # Reactivate ODrive
-
-        # 'q' is pressed
-        elif keys[pygame.K_q]:  # 'q' key to restart motor
-            print("Resetting...")
-            odrv0.axis1.controller.input_pos = 0
-            odrv0.axis1.requested_state = 3  # Set ODrive to idle state
-            odrv0.axis0.controller.input_pos = 0
-            odrv0.axis0.requested_state = 3  # Set ODrive to idle state
-        # Break the loop if 'ESC'
-        elif keys[pygame.K_ESCAPE]:  # ESC to exit and restart motor
-            print("Exiting...")
-            odrv0.axis1.controller.input_pos = 0
-            odrv0.axis1.requested_state = 3  # Set ODrive to idle state
-            odrv0.axis0.controller.input_pos = 0
-            odrv0.axis0.requested_state = 3  # Set ODrive to idle state
-            break
-
-        # 'w' key to move forward
-        if keys[pygame.K_w]:
-            odrv0.axis1.controller.input_pos += 0.1
-            odrv0.axis0.controller.input_pos -= 0.1
-            print ('FORWARD')
-        # 's' key to move backwards
-        if keys[pygame.K_s]:
-            odrv0.axis1.controller.input_pos -= 0.1
-            odrv0.axis0.controller.input_pos += 0.1
-            print ('BACKWARD')
-        #'a' is pressed
-        if keys[pygame.K_a]:  # Steer Left
-            GPIO.output(pwm, GPIO.LOW)
-            GPIO.output(steering, GPIO.HIGH)
-            print ('LEFT')
-
-        #'d' is pressed
-        if keys[pygame.K_d]:  # Steer Right
-            GPIO.output(pwm, GPIO.LOW)
-            GPIO.output(steering, GPIO.LOW) 
-            print('RIGHT')
-        if not keys[pygame.K_a] and not keys[pygame.K_d]:  # Joystick IDLE
-            GPIO.output(pwm, GPIO.HIGH)
-            GPIO.output(steering, GPIO.HIGH)
-    else:
-        break
-
+ 
 # Release the webcam and any output file, and close windows
 cap.release()
 pygame.quit()
