@@ -7,7 +7,7 @@
         <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
         <!-- CSS styles -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-        <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+        <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
         <!-- Mapbox CSS and JS -->
         <link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet">
         <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>        
@@ -91,10 +91,14 @@
                 <!-- New Container for Mid Route Duration -->
                 <ul id="instructions-list-mid"></ul>
             </div>
+
+            <!-- Hidden element to continuously update the current instruction -->
+            <div id="hidden-current-instruction" style="display: none;"></div>
         </div>
 
         <!-- Move the script to the end of the body -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
         <script src="https://unpkg.com/@mapbox/polyline/polyline.min.js"></script>
-        <script src="{{ url_for('static', filename='TestMapboxPolyline.js') }}"></script> <!-- Link to the JavaScript file -->
+        <script src="{{ url_for('static', path='TestMapboxPolyline.js') }}"></script> <!-- Link to the JavaScript file -->
     </body>
 </html>
