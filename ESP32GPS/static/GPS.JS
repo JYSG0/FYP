@@ -1,6 +1,6 @@
 let azimuth = null;
 let userDirection = null;
-let currentStep = null;
+let currentStep = 0;
 let currentLat = null;
 let currentLon = null;
 let routeData = null;
@@ -9,6 +9,8 @@ let midRouteData = null;
 // Global variable to store the current active tab
 let currentTab = 'fullRoute'; // Default to 'fullRoute'
 
+let currentData;
+let currentStepData;
 let start = [];  //Starting position coordinates
 let end = [];    //Destination position coordinates
 let current = [];
@@ -28,12 +30,16 @@ let directions = [];
 let myDirections = [];
 let bearingWLocations = [];
 let turnAngle = [];
+let myManeuvers = [];
+let myTurns = [];
 
 //Finding closest waypoint if starting midRoute
 let currentBearings = [];
 let currentDistances = [];
 
 //Store route data for full route and midroute
+let fullRoute = null;
+let userRoute = null;
 let route = null;
 let myRoute = null;
 
@@ -55,11 +61,12 @@ let travelType;
 
 //Mapbox Api key
 mapboxgl.accessToken = 'pk.eyJ1IjoiYW1hbmRheWFwIiwiYSI6ImNtMXFsOXh0aDAxYjYyaW9lbTkydjRhNTEifQ.q_7I3PMALzQlmJ62VfB76w';
+const socket = new WebSocket('ws://192.168.167.96:5501/ws');
 
 //Initialise map
 const map = new mapboxgl.Map({
     container: 'map', //container ID
-    center: [103.777353, 1.309636], //starting position [lng, lat]
+    center: [-74.0060, 40.7128], //starting position [lng, lat]
     zoom: 16, //starting zoom
     pitch: 30   //Set at angle to see cool 3D buildings
 });
@@ -80,52 +87,112 @@ map.on('rotate', function() {
     cardinalDirections.style.transform = `rotate(${rotation}deg)`;
 });
 
-//Function to fetch coordinates from the server
 async function fetchCoordinates() {
+    if (currentData) {
+        console.log('Using current data:', currentData);
+        // Update the UI or perform operations with currentData
+        await updateDotWithCoordinates(currentData);
+    }
+    //Fallback HTTP fetch request
+    // else {
+    //     try {
+    //         const response = await fetch('/get-coordinates');
+    //         if (!response.ok) {
+    //             const errorData = await response.json();
+    //             console.error('Error fetching coordinates:', errorData.message);
+    //             return;
+    //         }
+    //         const data = await response.json();
+    //         console.log('Coordinates received using HTTP:', data);
+    //         // Handle the data from the HTTP request
+    //         updateMapWithCoordinates(currentData);
+    //     } 
+    //     catch (error) {
+    //         console.error('Fetch error:', error);
+    //     }
+    // }
+}
+
+async function updateDotWithCoordinates(data) {
     try {
-        const response = await fetch('/coordinates');  //GET request to your Flask route
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error('Error fetching coordinates:', errorData.message);
-            return;
+        // Ensure data contains the necessary properties
+        const newCoordinates = [data.currentLon, data.currentLat];
+        
+        // Only perform the animation if coordinates have changed
+        if (!areCoordinatesEqual(current, newCoordinates)) {
+            // Start smooth transition to the new coordinates
+            smoothUpdateDot(current, newCoordinates);
+            // Update the current position
+            current = newCoordinates.slice();
+            currentLat = data.currentLat;
+            currentLon = data.currentLon;
+            azimuth = data.azimuth; // Update azimuth if needed
+            userDirection = data.direction; // Update user direction if needed
+            
+            console.log('Current location:', current);
+            console.log('Angle:', azimuth);
+            console.log('userDirection:', userDirection);
         }
 
-        const data = await response.json();
-        console.log('Coordinates received:', data);
-        
-        //Assuming you want to use the received coordinates
-        current = [data.start_longitude, data.start_latitude];  //Adjust according to your data structure
-        azimuth = data.azimuthAngle;
-        userDirection = data.userDirection;
-        console.log('Current location:', current);
-        console.log('Angle', azimuth);
-        console.log('Rotation', rotation);
-
-        //Update the triangle's position and orientation
-        currentLat = current[1];
-        currentLon = current[0];
-
+        // Update the triangle's orientation
         const triangle = document.getElementById('triangle');
         if (triangle) {
-            let updatedAzimuth;
-            updatedAzimuth = azimuth + rotation;
-            console.log(updatedAzimuth);
+            let updatedAzimuth = azimuth + rotation;
             if (updatedAzimuth > 360) {
-                updatedAzimuth = updatedAzimuth - 360;
+                updatedAzimuth -= 360;
             }
-            else{
-                updatedAzimuth = azimuth;
-            }
-            updateTrianglePosition(current, updatedAzimuth); //Update location and angle
+
+            updateTrianglePosition(current, updatedAzimuth);  // Update location and angle
         } 
         else {
             console.error('Triangle element not found');
         }
-        
-    } 
-    catch (error) {
+    } catch (error) {
         console.error('Fetch error:', error);
     }
+}
+
+// Smoothly update the dot's position on the map
+function smoothUpdateDot(startCoords, endCoords) {
+    const duration = 1000; // Duration of the transition in milliseconds
+    const startTime = performance.now(); // Start time for the animation
+
+    function animate(timestamp) {
+        const progress = Math.min((timestamp - startTime) / duration, 1); // Calculate progress
+
+        // Interpolate longitude and latitude
+        const lng = startCoords[0] + (endCoords[0] - startCoords[0]) * progress;
+        const lat = startCoords[1] + (endCoords[1] - startCoords[1]) * progress;
+
+        // Update the GeoJSON data for the dot
+        map.getSource('dot-point').setData({
+            'type': 'FeatureCollection',
+            'features': [
+                {
+                    'type': 'Feature',
+                    'geometry': {
+                        'type': 'Point',
+                        'coordinates': [lng, lat] // Update coordinates with interpolated values
+                    }
+                }
+            ]
+        });
+
+        if (progress < 1) {
+            requestAnimationFrame(animate); // Continue the animation until it completes
+        } 
+        else {
+            // When the animation completes, set the current to the end coordinates
+            current = endCoords.slice();
+        }
+    }
+
+    requestAnimationFrame(animate); // Start the animation
+}
+
+// Helper function to compare coordinates
+function areCoordinatesEqual(coord1, coord2) {
+    return coord1[0] === coord2[0] && coord1[1] === coord2[1];
 }
 
 // Set the initial rotations based on the initial map bearing
@@ -223,8 +290,9 @@ function recentreMapToCurrentLocation() {
             easing: (t) => t
         })
         
-        console.log(`Map recentred to current location: (${currentLatitude}, ${currentLongitude})`);
-    } else {
+        console.log(`Map recentred to current location: (${currentLat}, ${currentLon})`);
+    } 
+    else {
         console.error('Current location not available to recentre the map.');
     }
 }
@@ -371,26 +439,15 @@ if (viewRoutesButton) {
         viewRoutes = true;
 
         const dataToSend = {
-            start_latitude: startLat,
-            start_longitude: startLon,
-            end_latitude: endLat,
-            end_longitude: endLon
+            startLat: startLat,
+            startLon: startLon,
+            endLat: endLat,
+            endLon: endLon
         };
 
-        fetch('/update_coordinates', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(dataToSend)
-        })
-        .then(response => response.json())
-        .then(data => {
-            console.log('Coordinates successfully sent to server:', data);
-        })
-        .catch((error) => {
-            console.error('Error sending coordinates to server:', error);
-        });
+        //Send data to websocket
+        socket.send(JSON.stringify(dataToSend));
+        console.log("Sent start and end coordinates to server:", dataToSend);
 
         updateMarkers();
         getRoute(startLat, startLon, endLat, endLon, travelType);
@@ -432,10 +489,13 @@ if (startRouteButton && clearMarkersButton) {
                 sendInstructionsToServer(directions);
                 sendWaypointsToServer(waypoints);
             }
-            sendRouteBearingToServer(bearingWLocations);
+            //sendManeuvers(myManeuvers, myTurns);
+            //sendRouteBearingToServer(bearingWLocations);
             sendTurnAngleToServer(turnAngle);
-            fetchCurrentStep();
-        } else {
+            // Listen for Step data
+            
+        }
+        else {
             startRouteButton.value = "Start Route";
             routeActive = false;
             start = [];
@@ -531,7 +591,8 @@ document.addEventListener("DOMContentLoaded", () => {
             //Show instructions
             instructionsContainer.style.display = 'block'; //Set display to block
             console.log('Instructions shown'); //Optional: Log to console
-        } else {
+        } 
+        else {
             //Hide instructions
             instructionsContainer.style.display = 'none'; //Set display to none
             console.log('Instructions hidden'); //Optional: Log to console
@@ -557,8 +618,7 @@ document.getElementById('shuffle-instr').addEventListener('click', function() {
     var instructionsListFull = document.getElementById('instructions-list-full');
     var instructionsListMid = document.getElementById('instructions-list-mid'); // Placeholder for shuffled instructions
 
-    // Track current step in the shuffled instructions
-    let currentStep = 0;
+    const hiddenCurrentInstruction = document.getElementById('hidden-current-instruction')
 
     // If the shuffle button is active, hide the tabs and always show mid-route instructions
     if (this.classList.contains('active') && routeActive){
@@ -576,15 +636,11 @@ document.getElementById('shuffle-instr').addEventListener('click', function() {
         midRouteDuration.innerHTML = ''; // Clear mid route duration
 
         if (midRoute){
-            // Show the mid-route shuffled instructions regardless of midRoute flag
-            showCurrentInstruction(myDirections, currentStep, myWaypoints, currentLat, currentLon);
-            
             // Copy mid-route instructions to full-route list
-            instructionsListFull.innerHTML = instructionsListMid.innerHTML;
+            instructionsListMid.textContent = hiddenCurrentInstruction.textContent;
             instructionsListFull.style.display = 'block'; // Show the copied instructions
         }
         else{
-            showCurrentInstruction(directions, currentStep, waypoints);
             // Copy mid-route instructions to full-route list
             instructionsListFull.innerHTML = instructionsListMid.innerHTML;
             instructionsListFull.style.display = 'block'; // Show the copied instructions
@@ -663,6 +719,7 @@ async function getRoute(startLat, startLon, endLat, endLon, travelType) {
     const json = await query.json();
     const routes = json.routes;
     console.log(routes)
+    fullRoute = routes;
 
     //Clear previous routes and markers before adding new ones
     clearPreviousRoutes();
@@ -689,7 +746,8 @@ async function getRoute(startLat, startLon, endLat, endLon, travelType) {
         //If the route (including alternatives) already exists on the map, reset it using setData
         if (map.getSource(routeId)) {
             map.getSource(routeId).setData(geojson);
-        } else {
+        }
+        else {
             //Add the route to the map if it doesn't exist yet
             map.addSource(routeId, {
                 type: 'geojson',
@@ -726,6 +784,8 @@ async function getRoute(startLat, startLon, endLat, endLon, travelType) {
 
 //Function to get current location to end
 async function reRoute(currentLat, currentLon, endLat, endLon, travelType) {
+    console.log('CurrentLat: ', currentLat)
+    console.log('CurrentLon: ',currentLon)
     const query = await fetch(
         `https://api.mapbox.com/directions/v5/mapbox/${travelType}/${currentLon},${currentLat};${endLon},${endLat}?steps=true&geometries=geojson&overview=full&alternatives=true&waypoints_per_route=true&access_token=${mapboxgl.accessToken}`,
         { method: 'GET' }
@@ -733,6 +793,9 @@ async function reRoute(currentLat, currentLon, endLat, endLon, travelType) {
     const json = await query.json();
     const routes = json.routes;
     console.log(routes)
+
+    userRoute = routes;
+    console.log("userRoute:", userRoute);
     
     myWaypoints = []; //Reset waypoints before extracting new ones
 
@@ -840,7 +903,8 @@ function showTab(tabName) {
             // Set styles for the active tab button
             tabButton.classList.add('tab-button-active');
             tabButton.classList.remove('tab-button-inactive');
-        } else {
+        } 
+        else {
             // Set styles for the inactive tab button
             tabButton.classList.remove('tab-button-active');
             tabButton.classList.add('tab-button-inactive');
@@ -919,22 +983,13 @@ function myInstructions(data, shuffleMode = false) {
 }
 
 function sendInstructionsToServer(directions){
-    fetch('/update_instructions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            instructions: directions //Sending the array of waypoint coordinates
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('instructions successfully sent to server:', data);
-    })
-    .catch((error) => {
-        console.error('Error sending instructions to server:', error);
+    const message = JSON.stringify({
+        type: 'instructions',
+        instructions: directions // Send the array of instructions
     });
+
+    socket.send(message)
+    console.log('Instructions sent to server:', directions);
 }
 
 //Function to extract waypoints from the route data
@@ -1011,23 +1066,11 @@ function extractMyWaypoints(myData){
 }
 
 function sendWaypointsToServer(waypoints) {
-    fetch('/update_waypoints', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            waypoints: waypoints //Sending the array of waypoint coordinates
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log(waypoints)
-        console.log('Coordinates successfully sent to server:', data);
-    })
-    .catch((error) => {
-        console.error('Error sending coordinates to server:', error);
-    });
+    socket.send(JSON.stringify({
+        type: 'waypoints',
+        waypoints: waypoints // Sending the array of waypoints
+    }));
+    console.log('Waypoints sent to server:', waypoints);
 }
 
 function calculateTurningAngle(data){
@@ -1040,6 +1083,8 @@ function calculateTurningAngle(data){
         let bearingAfter = steps[i].maneuver.bearing_after;
         let location = steps[i].maneuver.location;
         let type = steps[i].maneuver.type;
+        let modifier = steps[i].maneuver.modifier;
+        let turns = steps[i].maneuver.type;
         let turnOri;
 
         if (type == 'turn'){
@@ -1058,7 +1103,10 @@ function calculateTurningAngle(data){
                 angle: angle,
                 location: location,
                 type: type,
-                turnOri: turnOri
+                turnOri: turnOri,
+                bearingAfter: bearingAfter,
+                modifier: modifier,
+                turns: turns
             });
         }
     }
@@ -1068,22 +1116,11 @@ function calculateTurningAngle(data){
 }
 
 function sendTurnAngleToServer(turnAngle){
-    fetch('/update_turnAngle', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            turnAngle: turnAngle //Sending the array of waypoint coordinates
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('turnAngle successfully sent to server:', data);
-    })
-    .catch((error) => {
-        console.error('Error sending turnAngle to server:', error);
-    });
+    socket.send(JSON.stringify({
+        type: 'turnAngle',
+        turnAngle: turnAngle // Sending the array of instructions
+    }));
+    console.log('turnAngle sent to server:', turnAngle);
 }
 
 function routeBearing(myRoute) {
@@ -1201,54 +1238,45 @@ function toDegrees(radians) {
     return radians * (180 / Math.PI);
 }
 
-//Function to fetch currentStep from the server
-async function fetchCurrentStep() {
-    try {
-        const response = await fetch('/currentStep');  //GET request to your Flask route
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error('Error fetching currentStep:', errorData.message);
-            return;
-        }
+//Function that outputs instructions based on current/testStep in console instead of on display for now
 
-        const data = await response.json();
-        console.log('currentStep received:', data);
-        
-        //Assuming you want to use the received coordinates
-        currentStep = data
-        console.log(currentStep)
-        
-    } 
-    catch (error) {
-        console.error('Fetch error:', error);
-    }
-}
-
-function showCurrentInstruction(instructions, currentStep, waypoints, currentLat, currentLon) {
-    console.log(currentStep);
-    const instructionsListMid = document.getElementById('instructions-list-mid'); // Element to show shuffled instructions
-    instructionsListMid.innerHTML = ''; // Clear any previous instructions
+function showCurrentInstruction(instructions, currentStepObj, waypoints, currentLat, currentLon) {
+    console.log(instructions)
+    console.log(waypoints)
+    const totalSteps = instructions.length;
+    currentStep = currentStepObj.currentStep
+    console.log('currentStep: ', currentStep);
+    console.log('totalSteps: ', totalSteps)
     
-    const turnLon = waypoints[currentStep][0];
-    const turnLat = waypoints[currentStep][1];
+    const hiddenCurrentInstruction = document.getElementById('hidden-current-instruction'); // Element to show shuffled instructions
+    hiddenCurrentInstruction.innerHTML = ''; // Clear any previous instructions
 
-    console.log(`turnLon: ${turnLon}, turnLat: ${turnLat}`);
+    if (currentStep >= 0 && currentStep < totalSteps) {
+        console.log('currentStep instructions')
+        let turnStep = waypoints[currentStep]
+        console.log(turnStep)
 
-    const distanceToTurn = haversineBearing(currentLat, currentLon, turnLat, turnLon).distance;
-    console.log(distanceToTurn);
+        const turnLon = turnStep[0];
+        const turnLat = turnStep[1];
 
-    if (currentStep >= 0 && currentStep < instructions.length) {
+        console.log(`turnLon: ${turnLon}, turnLat: ${turnLat}`);
+
+        const distanceToTurn = haversineBearing(currentLat, currentLon, turnLat, turnLon).distance.toFixed(1);
+        console.log(distanceToTurn);
         let instructionText = instructions[currentStep].replace(/\.$/,'');
-        instructionsListMid.textContent = `${instructionText} for ${distanceToTurn}m`;
+        hiddenCurrentInstruction.textContent = `${instructionText} for ${distanceToTurn}m`;
+        console.log('currentStep: ', currentStep);
+
     } else {
+        console.log('currentStep fallback')
         // Fallback if no instruction is available
         const li = document.createElement('li');
-        li.textContent = `Keep going straight for ${distanceToTurn}`;
-        instructionsListMid.appendChild(li);
+        li.textContent = `Keep going straight for ${distanceToTurn} meters`;
+        //console.log(distanceToTurn.toFixed(1))
+        hiddenCurrentInstruction.appendChild(li);
     }
     
-    console.log(instructionsListMid);
-    fetchCurrentStep();
+    console.log('instructionsListMid: ', hiddenCurrentInstruction);
 }
 
 //Handle elements on the map
@@ -1256,6 +1284,7 @@ map.on('load', () => {
     //map.setBearing(15);//Set the desired angle in degrees
     map.addImage('pulsing-dot', pulsingDot, { pixelRatio: 2 });
 
+    //console.log("purple dot")
     map.addSource('dot-point', {
         'type': 'geojson',
         'data': {
@@ -1281,10 +1310,9 @@ map.on('load', () => {
     });
 
     setInterval(fetchCoordinates, 500); //Fetch every 0.5 seconds
-    if(routeActive){
-        setInterval(showCurrentInstruction, 500);
-    }
 });
+
+
 
 //Handle clicks on the map
 map.on('click', (event) => {
@@ -1302,5 +1330,57 @@ map.on('click', (event) => {
     }
 });
 
-//Call the fetchCoordinates function on window load or at a relevant time
-window.onload = fetchCoordinates();  //This will run the function when the page loads
+//Initialise websockets
+function socketListener(socket) {
+    socket.onopen = () => {
+        console.log('WebSocket connected');
+    };
+    
+    // Listen for incoming messages from the server
+    socket.onmessage = (event) => {  // Changed from `socket.on` to `socket.onmessage`
+        const data = JSON.parse(event.data);
+        console.log('Data received: ', data);
+        console.log('Data type: ', data.type);
+
+        if (data.update.type === 'currentCoords') {
+            const { type, ...rest } = data.update;
+            currentData = { ...rest};
+            console.log('Updated coordinates received:', currentData);
+            fetchCoordinates();
+        }
+        else if (data.update.type === 'testStep') {
+            const { type, ...rest } = data.update;
+            currentStep = {...rest};
+            console.log('Updated currentStep received:', currentStep);
+            showCurrentInstruction(myDirections, currentStep, myWaypoints, currentLat, currentLon); // Call here so it's not dependednt on the button click
+        
+            // if(midRoute){
+            //     showCurrentInstruction(myDirections, currentStep, myWaypoints, currentLat, currentLon); // Call here so it's not dependednt on the button click
+            // }
+            // else{
+            //     showCurrentInstruction(directions, currentStep, waypoints);
+
+            // }
+        } 
+        // else if (data.update.type === 'testStep') {
+        //     const { type, ...rest } = data.update;
+        //     currentStep = {...rest};
+        //     console.log('Updated currentStep received:', currentStep);
+        //     //fetchCurrentStep();
+        // } 
+        else {
+            console.warn('Unknown data type received: ', data);
+        }
+    };
+    
+    socket.onclose = () => {
+        console.log('WebSocket disconnected');
+    };
+
+    socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+    };
+}
+
+// Call the socketListener function when the window loads
+window.onload = socketListener(socket);
