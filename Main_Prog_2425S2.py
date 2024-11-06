@@ -4,9 +4,122 @@ from ultralytics import YOLO
 import odrive
 import Jetson.GPIO as GPIO
 import pygame
-from ultralytics import YOLO
 from collections import Counter
- 
+import time
+import socket
+
+# def server_program():
+#     host = '192.168.167.167'  # Accept connections from any IP address
+#     port = 5000  # Port to listen on
+
+#     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#     server_socket.bind((host, port))
+#     server_socket.listen(1)  # Accept only one connection for simplicity
+
+#     print("Waiting for connection from ESP32...")
+#     conn, address = server_socket.accept()  # Accept new connection
+#     print("Connection from:", address)
+
+#     try:
+#         # Receive data
+#         data = conn.recv(1024).decode()
+
+#         if data == "depart":
+#             if wifi:
+#                 print("Starting motor")
+#                 odrv0.axis0.requested_state = 8  # Activate ODrive axis 0
+#                 odrv0.axis1.requested_state = 8  # Activate ODrive axis 1
+                        
+#         elif data == "arrive":
+#             print("Stopping motor...")
+#             odrv0.axis0.requested_state = 3  # Set ODrive axis 0 to idle
+#             odrv0.axis1.requested_state = 3  # Set ODrive axis 1 to idle
+        
+#         elif 'turn' in data.lower():
+#             print("Moving forward...")
+#             odrv0.axis1.controller.input_vel += 2
+#             odrv0.axis0.controller.input_vel -= -2
+#         elif data == "backward":
+#            print("Moving backward...")
+#             odrv0.axis1.controller.input_pos -= 0.1
+#            odrv0.axis0.controller.input_pos += 0.1
+#     except Exception as e:
+#         print("Error:", e)
+#     # Send response
+#     response = "Hello from Jetson"
+#     conn.send(response.encode())
+
+    # try:
+    #     while True:
+    #         # Receive data
+    #         data = conn.recv(1024).decode()
+    #         if not data:
+    #             break
+    #         print("Received from ESP32:", data)
+
+    #         if data == "depart":
+    #             print("Starting motor")
+    #             # odrv0.axis0.requested_state = 8  # Activate ODrive axis 0
+    #             # odrv0.axis1.requested_state = 8  # Activate ODrive axis 1
+                            
+    #         elif data == "arrive":
+    #             print("Stopping motor...")
+    #             # odrv0.axis0.requested_state = 3  # Set ODrive axis 0 to idle
+    #             # odrv0.axis1.requested_state = 3  # Set ODrive axis 1 to idle
+            
+    #         elif 'turn' in data.lower():
+    #             print("Moving forward...")
+    #             # odrv0.axis1.controller.input_pos += 0.5
+    #             # odrv0.axis0.controller.input_pos -= 0.5
+    #         # elif data == "backward":
+    #         #    print("Moving backward...")
+    #         #     odrv0.axis1.controller.input_pos -= 0.1
+    #         #     odrv0.axis0.controller.input_pos += 0.1
+                
+    #         # Send response
+    #         response = "Hello from Jetson"
+    #         conn.send(response.encode())
+    # except Exception as e:
+    #     print("Error:", e)
+    # finally:
+    #     conn.close()  # Close the connection
+
+def calibration(odrv, duration=20):
+    """
+    Move axis0 and axis1 of the given ODrive instance in a defined pattern
+    for a specified duration.
+    
+    Parameters:
+        odrv: ODrive instance
+        duration: Total duration of the movement in seconds
+    """
+    # Define the key states
+    states = [(2, -2), (0, 0), (-2, 2)]
+    state_duration = duration / len(states)  # Duration for each state
+
+    start_time = time.time()
+    
+    while time.time() - start_time < duration:
+        elapsed_time = time.time() - start_time
+
+        # Determine the current state based on elapsed time
+        current_state_index = int(elapsed_time // state_duration) % len(states)
+        input_vel = states[current_state_index]
+
+        # Set input velocities for the axes
+        odrv.axis0.controller.input_vel = input_vel[1]  # Axis 0
+        odrv.axis1.controller.input_vel = input_vel[0]  # Axis 1
+
+        time.sleep(2)  # Small delay to prevent busy waiting
+
+    # Set both axes to zero velocity at the end
+    odrv.axis0.controller.input_vel = 0
+    odrv.axis1.controller.input_vel = 0
+
+# Example usage:
+# odrv0 = odrive.find_any()
+# move_axes(odrv0, duration=20)
+
 
 # Function to find and connect to ODrive
 def connect_to_odrive():
@@ -23,6 +136,11 @@ def connect_to_odrive():
 #Connect to ODrive
 odrv0 = connect_to_odrive()
 
+odrv0.axis0.controller.config.control_mode = 2
+odrv0.axis0.controller.config.input_mode = 2
+odrv0.axis0.requested_state = 8  # Reactivate ODrive
+odrv0.axis1.requested_state = 8 # Reactivate ODrive
+calibration(odrv0, duration=20)
 
 def Manual_drive(keys):
          # 'e' key to start motor
@@ -34,21 +152,29 @@ def Manual_drive(keys):
         # 'q' is pressed
         elif keys[pygame.K_q]:  # 'q' key to restart motor
             print("Resetting...")
-            odrv0.axis1.controller.input_pos = 0
+            odrv0.axis1.controller.input_vel = 0
             odrv0.axis1.requested_state = 3  # Set ODrive to idle state
-            odrv0.axis0.controller.input_pos = 0
+            odrv0.axis0.controller.input_vel = 0
             odrv0.axis0.requested_state = 3  # Set ODrive to idle state
 
         # 'w' key to move forward
         if keys[pygame.K_w]:
-            odrv0.axis1.controller.input_pos += 0.1
-            odrv0.axis0.controller.input_pos -= 0.1
-            print ('FORWARD')
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis0.controller.input_vel = 0
+
+            if odrv0.axis0.controller.input_vel == 0:
+                odrv0.axis1.controller.input_vel = 2
+                odrv0.axis0.controller.input_vel = -2
+
+                print ('FORWARD')
         # 's' key to move backwards
         if keys[pygame.K_s]:
-            odrv0.axis1.controller.input_pos -= 0.1
-            odrv0.axis0.controller.input_pos += 0.1
-            print ('BACKWARD')
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis0.controller.input_vel = 0
+            if odrv0.axis0.controller.input_vel == 0:
+                odrv0.axis1.controller.input_vel = -2
+                odrv0.axis0.controller.input_vel = 2
+                print ('BACKWARD')
         #'a' is pressed
         if keys[pygame.K_a]:  # Steer Left
             GPIO.output(pwm, GPIO.LOW)
@@ -66,11 +192,12 @@ def Manual_drive(keys):
             GPIO.output(steering, GPIO.HIGH)
             Steering = False
 
-
 def Lane():
     lane =+ 1
-def Auto():
-    auto =+ 1
+def Server():
+    odrv0.axis1.controller.input_vel = 2
+    odrv0.axis0.controller.input_vel = -2
+
 # Initialize pygame
 pygame.init()
 
@@ -88,7 +215,7 @@ screen = pygame.display.set_mode((640,480))
 print("ODrive Voltage:", odrv0.vbus_voltage)
 
 # Open the default webcam (index 1)
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(4)
 
 # Check if the webcam is opened correctly
 if not cap.isOpened():
@@ -123,8 +250,10 @@ out = None
 run_detection = True
 Auto_driving = True
 Steering = False
+wifi = True
 # Load the YOLOv8 model (YOLOv8s model used here; you can choose a different one)
 model = YOLO('best.pt')
+
 
 # Loop to capture, detect, and control recording
 while cap.isOpened():
@@ -157,35 +286,83 @@ while cap.isOpened():
 
         
         if Auto_driving and not keys[pygame.K_m]:
-            Auto()
-            Lane()
+            print ("Lane")
             if 4 in class_ids or 8 in class_ids:            
                 print ("Stop")
                 Auto_driving = False
                 run_detection = False
+                odrv0.axis1.controller.input_vel = 0
+                odrv0.axis0.controller.input_vel = 0
                 continue
             
         elif not Auto_driving and not keys[pygame.K_m]:
-            Manual_drive(keys)
-            
+                        # 'e' key to start motor
+            if keys[pygame.K_e]:  
+                print("Starting...")
+                odrv0.axis0.requested_state = 8  # Reactivate ODrive
+                odrv0.axis1.requested_state = 8 # Reactivate ODrive
 
-        elif keys[pygame.K_m]:
-            print("Override")
-            Auto_driving = True
-            run_detection = True
+            # 'q' is pressed
+            elif keys[pygame.K_q]:  # 'q' key to restart motor
+                print("Resetting...")
+                odrv0.axis1.controller.input_vel = 0
+                odrv0.axis1.requested_state = 3  # Set ODrive to idle state
+                odrv0.axis0.controller.input_vel = 0
+                odrv0.axis0.requested_state = 3  # Set ODrive to idle state
 
-        # If recording, write the frame to the video output file
-        if recording:
-            out.write(annotated_frame)
+            # 'w' key to move forward
+            if keys[pygame.K_w]:
+                odrv0.axis1.controller.input_vel = 0
+                odrv0.axis0.controller.input_vel = 0
 
-        # Break the loop if 'ESC'
-        elif keys[pygame.K_ESCAPE]:  # ESC to exit and restart motor
-            print("Exiting...")
-            odrv0.axis1.controller.input_pos = 0
-            odrv0.axis1.requested_state = 3  # Set ODrive to idle state
-            odrv0.axis0.controller.input_pos = 0
-            odrv0.axis0.requested_state = 3  # Set ODrive to idle state
-            break
+                if odrv0.axis0.controller.input_vel == 0:
+                    odrv0.axis1.controller.input_vel = 2
+                    odrv0.axis0.controller.input_vel = -2
+
+                    print ('FORWARD')
+            # 's' key to move backwards
+            if keys[pygame.K_s]:
+                odrv0.axis1.controller.input_vel = 0
+                odrv0.axis0.controller.input_vel = 0
+                if odrv0.axis0.controller.input_vel == 0:
+                    odrv0.axis1.controller.input_vel = -2
+                    odrv0.axis0.controller.input_vel = 2
+                    print ('BACKWARD')
+            #'a' is pressed
+            if keys[pygame.K_a]:  # Steer Left
+                GPIO.output(pwm, GPIO.LOW)
+                GPIO.output(steering, GPIO.HIGH)
+                print ('LEFT')
+                Steering = True
+            #'d' is pressed
+            if keys[pygame.K_d]:  # Steer Right
+                GPIO.output(pwm, GPIO.LOW)
+                GPIO.output(steering, GPIO.LOW) 
+                print('RIGHT')
+                Steering = True
+            if not keys[pygame.K_a] and not keys[pygame.K_d]:  # Joystick IDLE
+                GPIO.output(pwm, GPIO.HIGH)
+                GPIO.output(steering, GPIO.HIGH)
+                Steering = False
+                
+
+            elif keys[pygame.K_m]:
+                print("Override")
+                Auto_driving = True
+                run_detection = True
+
+            # If recording, write the frame to the video output file
+            if recording:
+                out.write(annotated_frame)
+
+            # Break the loop if 'ESC'
+            elif keys[pygame.K_ESCAPE]:  # ESC to exit and restart motor
+                print("Exiting...")
+                odrv0.axis1.controller.input_vel = 0
+                odrv0.axis1.requested_state = 3  # Set ODrive to idle state
+                odrv0.axis0.controller.input_vel = 0
+                odrv0.axis0.requested_state = 3  # Set ODrive to idle state
+                break
         # 'r' key to start/stop video recording
         if keys[pygame.K_r]:
             if not recording:
@@ -225,4 +402,3 @@ pygame.quit()
 if recording:
     out.release()
 cv2.destroyAllWindows()
-
