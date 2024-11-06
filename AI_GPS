@@ -1,0 +1,153 @@
+# main.py
+import socket
+import odrive
+import torch
+import cv2
+import numpy as np
+from FINAL_UNET import UNet  # Import the UNet class from unet.py
+
+# Global variable to track drivable area detection
+drivable_area_detected = False  
+
+# Load the model
+model = UNet(in_channels=3, out_channels=1)
+model.load_state_dict(torch.load('unet_model_with_class_weights.pth'))
+model.eval()
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+
+# Preprocessing function for camera frame
+def preprocess_frame(frame):
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_tensor = torch.from_numpy(frame / 255.0).permute(2, 0, 1).float().unsqueeze(0)  # Add batch dimension
+    return frame_tensor
+
+def lane_detection():
+    global drivable_area_detected  # Declare as global to modify outside the function
+
+    cap = cv2.VideoCapture(1)  # Open the camera
+    if not cap.isOpened():
+        print("Error: Could not open camera.")
+        return
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
+        
+        # Preprocess the frame
+        frame_tensor = preprocess_frame(frame).to(device)
+
+        # Get model prediction
+        with torch.no_grad():
+            output = model(frame_tensor)
+            predicted_mask = torch.sigmoid(output)
+            predicted_mask = (predicted_mask > 0.7).float().squeeze().cpu().numpy()
+
+        # Resize predicted mask to match original frame
+        predicted_mask_resized = cv2.resize(predicted_mask, (640, 480), interpolation=cv2.INTER_NEAREST)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(predicted_mask_resized.astype(np.uint8), connectivity=8)
+
+        # Display lanes only if the area exceeds the threshold
+        if num_labels > 1:  # num_labels includes the background as label 0
+            largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])  # Skip background
+            largest_mask = (labels == largest_label).astype(np.uint8)
+
+            # Smooth the largest mask with morphological operations
+            kernel = np.ones((5, 5), np.uint8)
+            largest_mask = cv2.morphologyEx(largest_mask, cv2.MORPH_CLOSE, kernel)  # Close small gaps
+            largest_mask = cv2.GaussianBlur(largest_mask, (5, 5), 0)  # Apply Gaussian blur
+
+            # Convert largest mask to overlay on the frame
+            overlay = np.zeros_like(frame)
+            overlay[largest_mask > 0.5] = [0, 255, 0]  # Green for the detected largest area
+
+            # Combine original frame with overlay
+            combined_image = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
+
+            # Display the result
+            cv2.imshow('Smoothed Largest Drivable Area Detection', combined_image)
+            drivable_area_detected = True  # Set to True when a drivable area is detected
+        else:
+            # Display the original frame if no drivable area is detected
+            cv2.imshow('Smoothed Largest Drivable Area Detection', frame)
+            drivable_area_detected = False  # Reset to False when no drivable area is detected
+
+        # Break the loop if 'q' is pressed
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()  # Close windows after exiting
+
+# Connect to ODrive
+def connect_to_odrive():
+    print("Finding odrive")
+    try:
+        odrv = odrive.find_any()
+        if odrv is None:
+            print("ODrive not found. Exiting program.")
+            exit()
+        print("ODrive connected successfully.")
+        return odrv
+    except Exception as e:
+        print("Error connecting to ODrive:", e)
+        exit()
+
+# Connect to ODrive
+odrv0 = connect_to_odrive()
+
+def server_program():
+    global drivable_area_detected  # Declare as global to access the flag
+
+    host = ''  # Accept connections from any IP address
+    port = 5000  # Port to listen on
+
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((host, port))
+    server_socket.listen(1)  # Accept only one connection for simplicity
+
+    print("Waiting for connection from ESP32...")
+    conn, address = server_socket.accept()  # Accept new connection
+    print("Connection from:", address)
+
+    try:
+        while True:
+            # Receive data
+            data = conn.recv(1024).decode()
+            if not data:
+                break
+            print("Received from ESP32:", data)
+
+            if data == "depart":
+                print("Starting motor")
+                if not drivable_area_detected:  # Check if a drivable area was detected
+                    lane_detection()
+                    
+                else:
+                    odrv0.axis0.requested_state = 8  # Activate ODrive axis 0
+                    odrv0.axis1.requested_state = 8  # Activate ODrive axis 1
+
+            elif data == "arrive":
+                print("Stopping motor...")
+                odrv0.axis0.requested_state = 3  # Set ODrive axis 0 to idle
+                odrv0.axis1.requested_state = 3  # Set ODrive axis 1 to idle
+
+
+            # Send response
+            response = "Hello from Jetson"
+            conn.send(response.encode())
+    except Exception as e:
+        print("Error:", e)
+    finally:
+        conn.close()  # Close the connection
+
+if __name__ == '__main__':
+    # Start lane detection in a separate thread or process
+    import threading
+    lane_detection_thread = threading.Thread(target=lane_detection)
+    lane_detection_thread.start()
+    
+    server_program()
