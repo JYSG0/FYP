@@ -1,4 +1,4 @@
-from tools.demo import YOLOP
+from tools.demoboth import YOLOP
 import argparse
 import torch
 from lib.config import cfg, update_config
