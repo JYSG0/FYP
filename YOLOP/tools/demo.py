@@ -38,10 +38,34 @@ transform=transforms.Compose([
         ])
 class YOLOP:
 
+    def start_recording(self, img_det, save_path, fps, fourcc='mp4v'):
+        """
+        Start video recording.
+        """
+        self.vid_writer = cv2.VideoWriter(
+            save_path,
+            cv2.VideoWriter_fourcc(*fourcc),
+            fps,
+            (img_det.shape[1], img_det.shape[0])
+        )
+        self.is_recording = True
+        print(f"Recording started. Saving to {save_path}")
+
+    def stop_recording(self):
+        """
+        Stop video recording.
+        """
+        if self.vid_writer:
+            self.vid_writer.release()
+            self.vid_writer = None
+            self.is_recording = False
+            print("Recording stopped and video saved.")
 
     def __init__(self, cfg, opt):
         self.cfg = cfg
         self.opt = opt
+        self.is_recording = False
+        self.vid_writer = None
 
     def detect(self):
         cfg = self.cfg
@@ -69,6 +93,7 @@ class YOLOP:
             cudnn.benchmark = True  # set True to speed up constant image size inference
             dataset = LoadStreams(opt.source, img_size=opt.img_size)
             bs = len(dataset)  # batch_size
+
         else:
             dataset = LoadImages(opt.source, img_size=opt.img_size)
             bs = 1  # batch_size
@@ -143,7 +168,9 @@ class YOLOP:
                 for *xyxy,conf,cls in reversed(det):
                     label_det_pred = f'{names[int(cls)]} {conf:.2f}'
                     plot_one_box(xyxy, img_det , label=label_det_pred, color=colors[int(cls)], line_thickness=2)
-            
+
+
+
             if dataset.mode == 'images':
                 cv2.imwrite(save_path,img_det)
 
@@ -160,8 +187,16 @@ class YOLOP:
                 vid_writer.write(img_det)
             
             else:
-                cv2.imshow('image', img_det)
-                cv2.waitKey(1)  # 1 millisecond
+                    fourcc = 'mp4v'  # output video codec
+                    fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                    if not self.is_recording:
+                        self.start_recording(img_det, save_path, fps)
+                    
+                    if self.is_recording:
+                        self.vid_writer.write(img_det)
+
+                    cv2.imshow('image', img_det)
+                    cv2.waitKey(1)
 
         print('Results saved to %s' % Path(opt.save_dir))
         print('Done. (%.3fs)' % (time.time() - t0))
