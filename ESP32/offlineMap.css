@@ -1,0 +1,262 @@
+#map {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden; /*prevent scrolling*/
+    position: absolute;
+    z-index: 0;
+}
+
+#search-bar {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999;
+    width: 300px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    z-index: 1;
+    
+}
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden; /* Prevent scrolling */
+}
+
+.search-container {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    gap: 10px;
+    margin-left: 10px;
+}
+
+.search-box-container {
+    flex: 1;
+    width: 100%; /* Ensure consistent width for search boxes */
+}
+
+.search-box {
+    width: 180px; /* Adjust to leave space for the button */
+    padding: 8px;
+    box-sizing: border-box;
+    height: 45px;
+    font-size: 18px;
+}
+
+.search-area {
+    display: flex; /* Align the search box and toggle button side by side */
+    justify-content: center; /* Center contents if needed */
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px; /* Add spacing between search-area and btn-container */
+    z-index: 1;
+    position: absolute;
+    top: 10px; /* Adjust vertical position */
+    left: 10px; /* Center horizontally */
+}
+
+.button-container {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    position: absolute; /* Place this area above the map */
+    z-index: 1;
+    top: 125px; /* Adjust vertical position */
+    left: 10px; /* Center horizontally */
+}
+
+/* Button styling */
+#toggleSearchBoxes {
+    background-color: white;
+    border: 2px solid #1C274C;
+    width: 35.33px;
+    height: 35.33px;
+    display: flex;
+    border-radius: 5px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    --svg-colour: #1C274C
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+#toggleSearchBoxes .icon {
+    width: 24px;
+    height: 24px;
+    stroke: #1C274C;
+    fill: none;
+    transition: stroke 0.3s ease;
+}
+
+#toggleSearchBoxes:hover {
+    background-color: #1C274C;
+    color: white;
+    border-color: #1C274C;
+    --svg-colour: white
+}
+
+#toggleSearchBoxes:hover .icon {
+    stroke: white; /* Change the SVG stroke color on hover */
+}
+
+/* General button styles */
+.btn {
+    background-color: #fff;
+    border: 2px solid #1C274C; /* Dark border like in the picture */
+    border-radius: 30px; /* Rounded corners */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 24px; /* Padding for button */
+    font-size: 16px; /* Text size */
+    font-weight: bold; /* Font weight for the text */
+    cursor: pointer;
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+    gap: 1px; /* Space between the icon and text */
+}
+
+/* Walking button specific styles */
+.walking, 
+.bicycle, 
+.car{
+    background-color: #f8f5f5;
+    --svg-colour: #1C274C;
+}
+
+.walking .icon, 
+.bicycle .icon
+.car .icon{
+    width: 24px; /* Icon size */
+    height: 24px;
+    display: inline-block;
+    stroke: var(--svg-colour);
+    fill: var(--svg-colour);
+}
+
+/* Hover effect for button */
+.btn.walking:hover,
+.btn.bicycle:hover,
+.btn.car:hover{
+    background-color: #1C274C; /* Background color on hover */
+    border-color: #1C274C; /* Border color on hover */
+    color: white; /* Text color on hover */
+    --svg-colour: white; /* Update SVG color */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* Add shadow for hover */
+}
+
+.btn.walking.active,
+.btn.bicycle.active,
+.btn.car.active{
+    background-color: #1C274C; /* Background color on hover */
+    border-color: #1C274C; /* Border color on hover */
+    color: white; /* Text color on hover */
+    --svg-colour: white; /* Update SVG color */
+    box-shadow: none;
+}
+
+
+/* Text styling for the button */
+.btn span {
+    display: flex;
+    align-items: center;
+    font-size: 16px; /* Size of the text */
+}
+
+/* Adjusting the button to match the image style */
+.btn.walking,
+.btn.bicycle,
+.btn.car{
+    background-color: white;
+    display: flex;
+    height: 40px;
+    width: 100px;
+    color: #1C274C;
+}
+
+.start-destination-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px; /* Add gap between start and destination boxes */
+}
+
+button {
+    width: 100px; /* Fixed width */
+    padding: 8px 16px;
+    cursor: pointer;
+}
+
+
+.routing-container {
+    position: absolute; /* Position relative to the map */
+    top: 175px; /* Adjust this value based on your layout */
+    left: 0px; /* Align to the right */
+    display: none; /* Use flexbox for alignment */
+    gap: 10px; /* Space between buttons */
+    z-index: 1; /* Ensure it is above the map */
+}
+
+#start-route, #view-route {
+    width: 80%; /* Full width of the container */
+    max-width: 150px; /* Set max width for buttons */
+    border-radius: 5px; /* Rounded corners */
+    padding: 10px 15px; /* Padding for size */
+    cursor: pointer; /* Pointer cursor on hover */
+    font-size: 16px; /* Font size */
+    transition: background-color 0.3s; /* Smooth transition for hover */
+    border: 2px solid#007bff; /* No border */
+}
+
+#start-route{
+    background-color: white; /* Blue background */
+    color: #007bff; /* Blue text */
+}
+
+#view-route{
+    background-color: #007bff; /* Blue background */
+    color: white; /* White text */
+}
+
+#start-route:hover{
+    background-color: #007bff; /* Blue background */
+    color: white; /* White text */
+}
+
+#view-route:hover{
+    background-color: white; /* Blue background */
+    color: #007bff; /* White text */
+}
+
+#clear-markers {
+    background-color: white; /* White background */
+    border-radius: 5px; /* Rounded corners */
+    color: #007bff; /* Blue text */
+    padding: 10px;
+    cursor: pointer;
+    margin-left: 10px;
+    font-size: 12px; /* Font size */
+    transition: background-color 0.3s; /* Smooth transition for hover */
+    border: 2px solid#007bff; /* No border */
+  }
+  
+  #clear-markers:hover{
+    background-color: #007bff; /* Blue background */
+    color: white; /* White text */
+  }
+  
+  #clear-markers:disabled {
+    background-color: #e0e0e0; /* Greyed out when disabled */
+    color: #0266d2; /* Blue text */
+    cursor: not-allowed;
+  }
+  
