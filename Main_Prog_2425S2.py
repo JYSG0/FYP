@@ -7,6 +7,20 @@ import pygame
 from collections import Counter
 import time
 import socket
+import numpy as np
+from FINAL_UNET import UNet  # Import the UNet class from unet.py
+import torch
+
+# Global variable to track drivable area detection
+drivable_area_detected = False  
+
+
+# # Preprocessing function for camera frame
+# def preprocess_frame(frame):
+#     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+#     frame_tensor = torch.from_numpy(frame / 255.0).permute(2, 0, 1).float().unsqueeze(0)  # Add batch dimension
+#     return frame_tensor
+
 
 # def server_program():
 #     host = '192.168.167.167'  # Accept connections from any IP address
@@ -116,10 +130,6 @@ def calibration(odrv, duration=20):
     odrv.axis0.controller.input_vel = 0
     odrv.axis1.controller.input_vel = 0
 
-# Example usage:
-# odrv0 = odrive.find_any()
-# move_axes(odrv0, duration=20)
-
 
 # Function to find and connect to ODrive
 def connect_to_odrive():
@@ -138,8 +148,12 @@ odrv0 = connect_to_odrive()
 
 odrv0.axis0.controller.config.control_mode = 2
 odrv0.axis0.controller.config.input_mode = 2
+odrv0.axis1.controller.config.control_mode = 2
+odrv0.axis1.controller.config.input_mode = 2
 odrv0.axis0.requested_state = 8  # Reactivate ODrive
 odrv0.axis1.requested_state = 8 # Reactivate ODrive
+odrv0.axis1.controller.input_vel = 2
+odrv0.axis0.controller.input_vel = -2
 calibration(odrv0, duration=20)
 
 def Manual_drive(keys):
@@ -250,7 +264,6 @@ out = None
 run_detection = True
 Auto_driving = True
 Steering = False
-wifi = True
 # Load the YOLOv8 model (YOLOv8s model used here; you can choose a different one)
 model = YOLO('best.pt')
 
@@ -259,6 +272,8 @@ model = YOLO('best.pt')
 while cap.isOpened():
     ret, frame = cap.read()  # Capture frame-by-frame
     if ret:
+        # Start lane detection in a separate thread or process
+
         # Handle event queue
         pygame.event.pump()
         keys = pygame.key.get_pressed()
@@ -270,7 +285,6 @@ while cap.isOpened():
                 class_ids = result.boxes.cls.tolist()
                 class_names = [model.names[int(id)] for id in class_ids]  # Map IDs to names
 
-    
             # Use Counter to count occurrences of each class name
             class_counts = Counter(class_names)
             # Print the count for each class detected
@@ -283,10 +297,11 @@ while cap.isOpened():
         # Display the annotated frame
         cv2.imshow('YOLOv8 Detection', annotated_frame)
 
-
         
-        if Auto_driving and not keys[pygame.K_m]:
-            print ("Lane")
+        if Auto_driving:
+            Lane()
+            
+            #
             if 4 in class_ids or 8 in class_ids:            
                 print ("Stop")
                 Auto_driving = False
@@ -295,74 +310,38 @@ while cap.isOpened():
                 odrv0.axis0.controller.input_vel = 0
                 continue
             
-        elif not Auto_driving and not keys[pygame.K_m]:
-                        # 'e' key to start motor
-            if keys[pygame.K_e]:  
-                print("Starting...")
-                odrv0.axis0.requested_state = 8  # Reactivate ODrive
-                odrv0.axis1.requested_state = 8 # Reactivate ODrive
+            elif 6 in class_ids or 7 in class_ids:
+                print("Slow")
+                odrv0.axis1.controller.input_vel = 1
+                odrv0.axis0.controller.input_vel = -1
 
-            # 'q' is pressed
-            elif keys[pygame.K_q]:  # 'q' key to restart motor
-                print("Resetting...")
-                odrv0.axis1.controller.input_vel = 0
-                odrv0.axis1.requested_state = 3  # Set ODrive to idle state
-                odrv0.axis0.controller.input_vel = 0
-                odrv0.axis0.requested_state = 3  # Set ODrive to idle state
+            if 1 in class_ids or 3 in class_ids:
+                print("Pedestrain")
+                odrv0.axis1.controller.input_vel = 1
+                odrv0.axis0.controller.input_vel = -1
+                     
+        elif not Auto_driving:
+            Manual_drive(keys)
+        
+        if keys[pygame.K_m]:
+            Auto_driving = not Auto_driving # Toggle Auto Driving
+            run_detection = not run_detection # Toggle run_detection
+            print (f"Auto Driving is now : [{Auto_driving}]")
+            print (f"Object Detection is now: [{run_detection}]")
 
-            # 'w' key to move forward
-            if keys[pygame.K_w]:
-                odrv0.axis1.controller.input_vel = 0
-                odrv0.axis0.controller.input_vel = 0
+        # If recording, write the frame to the video output file
+        if recording:
+            out.write(annotated_frame)
 
-                if odrv0.axis0.controller.input_vel == 0:
-                    odrv0.axis1.controller.input_vel = 2
-                    odrv0.axis0.controller.input_vel = -2
 
-                    print ('FORWARD')
-            # 's' key to move backwards
-            if keys[pygame.K_s]:
-                odrv0.axis1.controller.input_vel = 0
-                odrv0.axis0.controller.input_vel = 0
-                if odrv0.axis0.controller.input_vel == 0:
-                    odrv0.axis1.controller.input_vel = -2
-                    odrv0.axis0.controller.input_vel = 2
-                    print ('BACKWARD')
-            #'a' is pressed
-            if keys[pygame.K_a]:  # Steer Left
-                GPIO.output(pwm, GPIO.LOW)
-                GPIO.output(steering, GPIO.HIGH)
-                print ('LEFT')
-                Steering = True
-            #'d' is pressed
-            if keys[pygame.K_d]:  # Steer Right
-                GPIO.output(pwm, GPIO.LOW)
-                GPIO.output(steering, GPIO.LOW) 
-                print('RIGHT')
-                Steering = True
-            if not keys[pygame.K_a] and not keys[pygame.K_d]:  # Joystick IDLE
-                GPIO.output(pwm, GPIO.HIGH)
-                GPIO.output(steering, GPIO.HIGH)
-                Steering = False
-                
-
-            elif keys[pygame.K_m]:
-                print("Override")
-                Auto_driving = True
-                run_detection = True
-
-            # If recording, write the frame to the video output file
-            if recording:
-                out.write(annotated_frame)
-
-            # Break the loop if 'ESC'
-            elif keys[pygame.K_ESCAPE]:  # ESC to exit and restart motor
-                print("Exiting...")
-                odrv0.axis1.controller.input_vel = 0
-                odrv0.axis1.requested_state = 3  # Set ODrive to idle state
-                odrv0.axis0.controller.input_vel = 0
-                odrv0.axis0.requested_state = 3  # Set ODrive to idle state
-                break
+        # Break the loop if 'ESC'
+        elif keys[pygame.K_ESCAPE]:  # ESC to exit and restart motor
+            print("Exiting...")
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis1.requested_state = 3  # Set ODrive to idle state
+            odrv0.axis0.controller.input_vel = 0
+            odrv0.axis0.requested_state = 3  # Set ODrive to idle state
+            break
         # 'r' key to start/stop video recording
         if keys[pygame.K_r]:
             if not recording:
@@ -379,8 +358,8 @@ while cap.isOpened():
                 vid_counter += 1
                 out.release()  # Stop recording and release the output file
 
-        # Break the loop if 'ESC'
-        elif keys[pygame.K_l]:  # ESC to exit and restart motor
+        # 'l' key to see status
+        elif keys[pygame.K_l]: 
             print("Status:")
             print ("Auto:",[{Auto_driving}])
             print ("Detection:",[{run_detection}])
