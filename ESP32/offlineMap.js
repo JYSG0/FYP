@@ -1,11 +1,14 @@
 let startMarker = null;
 let destinationMarker = null;
+let queryMarker = null;
+
 let start = [];
 let startLat = null;
 let startLon = null;
 let end = [];
 let endLat = null;
 let endLon = null;
+let query = [];
 
 let isStartSearchBox = false;
 let isEndSearchBox = false;
@@ -22,17 +25,35 @@ const map = new maplibregl.Map({
     zoom: 11.5, // Initial zoom level
 });
 
-//====================== Search, Start point, and Destination search boxes ======================== //
+//====================== Search, Start point, and Destination search boxes ========================//
 const searchBoxContainer = document.getElementById('searchBoxContainer');
 let isSingleQueryMode = true; // Tracks which mode we're in
 
 // Attach listeners for the Normal Search box
 const attachQueryBoxListeners = () => {
     const queryBox = document.getElementById('queryBox');
-    queryBox.addEventListener('keydown', (event) => {
+    queryBox.addEventListener('keydown', async (event) => {
         if (event.key === 'Enter') {
             console.log(`Query = ${queryBox.value}`);
             // Implement Nominatim query logic here
+            const data = await geocodeNominatim(queryBox.value, 'forward');
+            console.log(data);
+
+            query = [parseFloat(data.lon), parseFloat(data.lat)];
+
+            map.flyTo({
+                center: query,
+                zoom: 9,
+                speed: 1.2,
+                curve: 1,
+            });
+
+            isStartSearchBox = false;
+            isEndSearchBox = false;
+
+            updateMarkers();
+
+            await triggerRouting();
         }
     });
 };
@@ -74,10 +95,12 @@ const attachStartAndDestinationListeners = () => {
                 curve: 1,
             });
 
-            if (startMarker) startMarker.remove();
-            startMarker = new maplibregl.Marker({ color: '#28A228' })
-                .setLngLat(start)
-                .addTo(map);
+            isStartSearchBox = false;
+            isEndSearchBox = false;
+
+            updateMarkers();
+
+            await triggerRouting();
         }
     });
 
@@ -112,18 +135,18 @@ const attachStartAndDestinationListeners = () => {
                 curve: 1,
             });
 
-            if (destinationMarker) destinationMarker.remove();
-            destinationMarker = new maplibregl.Marker({ color: '#FF6961' })
-                .setLngLat(end)
-                .addTo(map);
+            updateMarkers();
+
+            isStartSearchBox = false;
+            isEndSearchBox = false;
+            
+            await triggerRouting();
         }
     });
 };
 
-
 // Toggle between Normal Search and Start/Destination modes
 const toggleSearchBoxes = () => {
-    const filterButtons = document.querySelector('.button-container');
     const routingButtons = document.querySelector('.routing-container');
 
     if (isSingleQueryMode) {
@@ -142,7 +165,6 @@ const toggleSearchBoxes = () => {
         attachStartAndDestinationListeners();
 
         // Show filter buttons
-        filterButtons.style.display = 'flex';
         routingButtons.style.display = 'flex';
     } else {
         // Switch back to single query mode
@@ -152,7 +174,6 @@ const toggleSearchBoxes = () => {
         attachQueryBoxListeners();
 
         // Hide filter buttons
-        filterButtons.style.display = 'none';
         routingButtons.style.display = 'none';
     }
 
@@ -163,31 +184,10 @@ const toggleSearchBoxes = () => {
 // Initial setup
 document.getElementById('toggleSearchBoxes').addEventListener('click', toggleSearchBoxes);
 attachQueryBoxListeners();
-//=============================================================================================== //
+//===============================================================================================//
 
-//================================== FILTER ROUTE TYPE BUTTONS ================================== //
-document.querySelectorAll('.btn').forEach(button => {
-    button.addEventListener('click', () => {
-        // Remove 'active' class from all buttons
-        document.querySelectorAll('.btn').forEach(btn => btn.classList.remove('active'));
-        if (button.textContent.trim() == 'Walking') {
-            routeChoice = 'foot'
-        }
-        else if (button.textContent.trim() == 'Bicycle'){
-            routeChoice = 'bicycle'
-        }
-        else {
-            routeChoice = 'car'
-        }
 
-        console.log(routeChoice);
-
-        // Add 'active' class to the clicked button
-        button.classList.add('active');
-    });
-});
-//=============================================================================================== //
-
+//========================================== GEOCODING ==========================================//
 //Function to fetch geocode results from Nominatim
 async function geocodeNominatim(query, type) {
     let url;
@@ -217,6 +217,37 @@ async function geocodeNominatim(query, type) {
         throw error;
     }
 }
+//===============================================================================================//
+
+
+//=========================================== ROUTING ===========================================//
+const triggerRouting = async () =>{
+    if (start.length && end.length){
+        console.log(`Route from (${start[1]}, ${start[0]}) to (${end[1]}, ${end[0]})`);
+        midRoute = true;
+    }
+    else if (start.length || end.length){ //If only start is filled
+        midRoute = false;
+    }
+    else {
+        console.error('No valid start or end points available')
+    }
+
+    try{
+        usrRoute = await routeOSRM(current, end);   //Always route usr route
+        addRouteToMap(usrRoute, "A020F0", "usrRoute");
+        console.log('Route: ', usrRoute);
+
+        if (midRoute){
+            route = await routeOSRM(start, end);    //If current is not start pnt, route full route too
+            addRouteToMap(route, "#0074D9", "fullRoute");
+        }
+    }
+    catch (error) {
+        console.error('Error fetching route:', error);
+    }
+}
+
 
 //Function to fetch route results from OSRM
 async function routeOSRM(start, end, routeChoice) {
@@ -237,8 +268,7 @@ async function routeOSRM(start, end, routeChoice) {
 }
 
 //Add route to map
-// Add route to map
-function addRouteToMap(route) {
+function addRouteToMap(route, colour, routeID) {
     const geojson = {
         type: "Feature",
         properties: {},
@@ -246,31 +276,127 @@ function addRouteToMap(route) {
     };
 
     // Check if the route layer already exists
-    if (map.getSource("route")) {
-        map.getSource("route").setData(geojson); // Update the route
+    if (map.getSource(routeID)) {
+        map.getSource(routeID).setData(geojson); // Update the route
     } else {
         // Add route source
-        map.addSource("route", {
+        map.addSource(routeID, {
             type: "geojson",
             data: geojson,
         });
 
         // Add route layer
         map.addLayer({
-            id: "route",
+            id: routeID,
             type: "line",
-            source: "route",
+            source: routeID,
             layout: {
                 "line-cap": "round",
                 "line-join": "round",
             },
             paint: {
-                "line-color": "#0074D9", // Adjust route color
+                "line-color": colour, // Adjust route color
                 "line-width": 5,        // Adjust route width
             },
         });
     }
 }
+//===============================================================================================//
+
+//================================= DISPLAY INSTRUCTIONS BUTTON =================================//
+document.addEventListener("DOMContentLoaded", () => {
+    //Get the toggle button and the instructions container
+    const toggleButton = document.getElementById('display-instr');
+    const instructionsContainer = document.getElementById('instructions');
+
+    let showInstructions = false; //To track the visibility state
+
+    toggleButton.addEventListener('click', () => {
+        showInstructions = !showInstructions; //Toggle the state
+
+        if (showInstructions) {
+            //Show instructions
+            instructionsContainer.style.display = 'block'; //Set display to block
+            console.log('Instructions shown'); //Optional: Log to console
+        } else {
+            //Hide instructions
+            instructionsContainer.style.display = 'none'; //Set display to none
+            console.log('Instructions hidden'); //Optional: Log to console
+        }
+    });
+});
+//===============================================================================================//
+
+
+//============================== SHUFFLE INSTRUCTIONS STYLE BUTTON ==============================//
+document.getElementById('toggle-instr').addEventListener('click', function() {
+    // Toggle active class for shuffle button
+    this.classList.toggle('active');
+
+    // Get instructions container and toggle active state
+    var instructionsCont = document.getElementById('instructions');
+    instructionsCont.classList.toggle('active');
+    
+    // Hide the full route and mid route tabs when shuffle is active
+    var fullRouteButton = document.querySelector('button[onclick="showTab(\'fullRoute\')"]');
+    var midRouteButton = document.querySelector('button[onclick="showTab(\'midRoute\')"]');
+    
+    // Elements for instructions list
+    var instructionsListFull = document.getElementById('instructions-list-full');
+    var instructionsListMid = document.getElementById('instructions-list-mid'); // Placeholder for shuffled instructions
+
+    // Track current step in the shuffled instructions
+    let currentStep = 0;
+
+    // If the shuffle button is active, hide the tabs and always show mid-route instructions
+    if (this.classList.contains('active') && routeActive){
+        fullRouteButton.style.display = 'none'; // Hide Full Route tab
+        midRouteButton.style.display = 'none'; // Hide Mid Route tab
+        
+        // Clear the instructions list and replace with mid-route shuffled instructions
+        instructionsListFull.style.display = 'none'; // Hide the full route list
+        instructionsListMid.style.display = 'block'; // Show the mid-route shuffled instruction display
+
+        // Clear the full route duration
+        const fullRouteDuration = document.getElementById('full-route-duration');
+        const midRouteDuration = document.getElementById('mid-route-duration');
+        fullRouteDuration.innerHTML = ''; // Clear the full trip duration
+        midRouteDuration.innerHTML = ''; // Clear mid route duration
+
+        if (midRoute){
+            // Show the mid-route shuffled instructions regardless of midRoute flag
+            showCurrentInstruction(myDirections, currentStep, myWaypoints, currentLat, currentLon);
+            
+            // Copy mid-route instructions to full-route list
+            instructionsListFull.innerHTML = instructionsListMid.innerHTML;
+            instructionsListFull.style.display = 'block'; // Show the copied instructions
+        }
+        else{
+            showCurrentInstruction(directions, currentStep, waypoints);
+            // Copy mid-route instructions to full-route list
+            instructionsListFull.innerHTML = instructionsListMid.innerHTML;
+            instructionsListFull.style.display = 'block'; // Show the copied instructions
+            console.log('Full route instructions not applicable');
+        }
+        
+        console.log('Shuffle mode ON: Displaying mid-route shuffled instructions.');
+    } 
+    else {
+        // Shuffle mode off, show the Full Route and Mid Route buttons again
+        fullRouteButton.style.display = 'inline-block';
+        midRouteButton.style.display = 'inline-block';
+        
+        // Switch back to full route and mid route instructions based on the default state
+        instructionsListFull.style.display = 'block';
+        instructionsListMid.style.display = 'block';
+        
+        instructions(routeData); // Restore full route instructions
+        myInstructions(midRouteData); // Restore mid-route instructions
+
+        console.log('Shuffle mode OFF: Restoring full route and mid-route instructions.');
+    }
+});
+//===============================================================================================//
 
 //Handle clicks on the map
 map.on('click', async (event) => {
@@ -321,6 +447,9 @@ const updateMarkers = () => {
     if (destinationMarker) {
         destinationMarker.remove();
     }
+    if (queryMarker){
+        queryMarker.remove();
+    }
 
     //Create new start marker if a start location exists
     if (start.length) {
@@ -335,56 +464,11 @@ const updateMarkers = () => {
             .setLngLat(end)
             .addTo(map);
     }
+
+    //Create a new query marker if a query location exists
+    if (query.length){
+        queryMarker = new maplibregl.Marker({ color: '#7F8389' }) //Red marker for destination
+            .setLngLat(query)
+            .addTo(map);
+    }
 };
-
-//=====================================  DIRECTIONS BUTTON =======================================//
-const viewRoutesButton = document.getElementById('view-route');
-if (viewRoutesButton) {
-    viewRoutesButton.addEventListener('click', async () => {
-
-        isStartSearchBox = false;
-        isEndSearchBox = false;
-
-        // if (start.length === 0) {
-        //     start = [...current];
-        //     midRoute = false
-        // } else if (end.length === 0) {
-        //     end = [...current];
-        //     midRoute = false
-        // }
-        // else {
-        //     midRoute = true
-        // }
-
-        const [startLon, startLat] = start;
-        const [endLon, endLat] = end;
-
-        console.log(`Start route from (${startLat}, ${startLon}) to (${endLat}, ${endLon})`);
-        
-        viewRoutes = true;
-
-        const dataToSend = {
-            startLat: startLat,
-            startLon: startLon,
-            endLat: endLat,
-            endLon: endLon
-        };
-
-        //Send data to websocket
-        // socket.send(JSON.stringify(dataToSend));
-        // console.log("Sent start and end coordinates to server:", dataToSend);
-
-        updateMarkers();
-        route = await routeOSRM(start, end, routeChoice); //Route full route
-        console.log(`Midroute: ${midRoute}`);
-        addRouteToMap(route);
-        console.log(route);
-        // if (midRoute){
-        //     routeOSRM();    //Route user route too
-        // }
-    });
-} 
-else {
-    console.error('View Routes button not found in the DOM');
-}
-//===============================================================================================//
