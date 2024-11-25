@@ -80,8 +80,8 @@ body {
 #toggleSearchBoxes {
     background-color: white;
     border: 2px solid #1C274C;
-    width: 35.33px;
-    height: 35.33px;
+    width: 40px;
+    height: 40px;
     display: flex;
     border-radius: 5px;
     align-items: center;
@@ -110,80 +110,6 @@ body {
     stroke: white; /* Change the SVG stroke color on hover */
 }
 
-/* General button styles */
-.btn {
-    background-color: #fff;
-    border: 2px solid #1C274C; /* Dark border like in the picture */
-    border-radius: 30px; /* Rounded corners */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 12px 24px; /* Padding for button */
-    font-size: 16px; /* Text size */
-    font-weight: bold; /* Font weight for the text */
-    cursor: pointer;
-    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
-    gap: 1px; /* Space between the icon and text */
-}
-
-/* Walking button specific styles */
-.walking, 
-.bicycle, 
-.car{
-    background-color: #f8f5f5;
-    --svg-colour: #1C274C;
-}
-
-.walking .icon, 
-.bicycle .icon
-.car .icon{
-    width: 24px; /* Icon size */
-    height: 24px;
-    display: inline-block;
-    stroke: var(--svg-colour);
-    fill: var(--svg-colour);
-}
-
-/* Hover effect for button */
-.btn.walking:hover,
-.btn.bicycle:hover,
-.btn.car:hover{
-    background-color: #1C274C; /* Background color on hover */
-    border-color: #1C274C; /* Border color on hover */
-    color: white; /* Text color on hover */
-    --svg-colour: white; /* Update SVG color */
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* Add shadow for hover */
-}
-
-.btn.walking.active,
-.btn.bicycle.active,
-.btn.car.active{
-    background-color: #1C274C; /* Background color on hover */
-    border-color: #1C274C; /* Border color on hover */
-    color: white; /* Text color on hover */
-    --svg-colour: white; /* Update SVG color */
-    box-shadow: none;
-}
-
-
-/* Text styling for the button */
-.btn span {
-    display: flex;
-    align-items: center;
-    font-size: 16px; /* Size of the text */
-}
-
-/* Adjusting the button to match the image style */
-.btn.walking,
-.btn.bicycle,
-.btn.car{
-    background-color: white;
-    display: flex;
-    height: 40px;
-    width: 100px;
-    color: #1C274C;
-}
-
 .start-destination-container {
     display: flex;
     flex-direction: column;
@@ -196,67 +122,181 @@ button {
     cursor: pointer;
 }
 
-
 .routing-container {
     position: absolute; /* Position relative to the map */
-    top: 175px; /* Adjust this value based on your layout */
+    top: 135px; /* Adjust this value based on your layout */
     left: 0px; /* Align to the right */
     display: none; /* Use flexbox for alignment */
     gap: 10px; /* Space between buttons */
     z-index: 1; /* Ensure it is above the map */
 }
 
-#start-route, #view-route {
-    width: 80%; /* Full width of the container */
-    max-width: 150px; /* Set max width for buttons */
-    border-radius: 5px; /* Rounded corners */
-    padding: 10px 15px; /* Padding for size */
+#start-route{
+    display: flex;
+    align-items: center;
+    width: auto; /* Full width of the container */
+    border-radius: 30px; /* Rounded corners */
+    padding: 10px; /* Padding for size */
     cursor: pointer; /* Pointer cursor on hover */
     font-size: 16px; /* Font size */
     transition: background-color 0.3s; /* Smooth transition for hover */
-    border: 2px solid#007bff; /* No border */
-}
-
-#start-route{
+    border: 2px solid#1C274C; /* No border */
     background-color: white; /* Blue background */
-    color: #007bff; /* Blue text */
-}
-
-#view-route{
-    background-color: #007bff; /* Blue background */
-    color: white; /* White text */
+    color: #1C274C; /* Blue text */
+    --start-icon-colour:#1C274C;
 }
 
 #start-route:hover{
-    background-color: #007bff; /* Blue background */
+    background-color: #1C274C; /* Blue background */
     color: white; /* White text */
-}
-
-#view-route:hover{
-    background-color: white; /* Blue background */
-    color: #007bff; /* White text */
+    --start-icon-colour:white;
 }
 
 #clear-markers {
+    display:flex;
+    align-items: center;
     background-color: white; /* White background */
-    border-radius: 5px; /* Rounded corners */
-    color: #007bff; /* Blue text */
+    border-radius: 30px; /* Rounded corners */
+    color: #1C274C; /* Blue text */
     padding: 10px;
     cursor: pointer;
     margin-left: 10px;
-    font-size: 12px; /* Font size */
+    font-size: 16px; /* Font size */
     transition: background-color 0.3s; /* Smooth transition for hover */
-    border: 2px solid#007bff; /* No border */
-  }
-  
-  #clear-markers:hover{
+    border: 2px solid#1C274C; /* No border */
+    width: auto;
+    height: auto;
+    --clear-icon-colour:#1C274C;
+}
+
+#clear-markers:hover{
+    background-color: #1C274C;
+    color: white;
+    border-color: #1C274C;
+    --clear-icon-colour:white;
+}
+
+#clear-markers:disabled {
+    background-color: #e0e0e0; /* Greyed out when disabled */
+    color: #1C274C; /* Blue text */
+    cursor: not-allowed;
+}
+
+#display-instr {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    background-color: #007BFF;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    z-index: 1000;
+    top: 10px;
+    right: 10px;
+    position: fixed;
+}
+
+#instructions {
+    position: absolute;
+    top: 70px;
+    right: 10px;
+    width: auto; /* Adjust width to fit content */
+    max-width: 300px; /* Optional: Set max width */
+    height: auto; /* Allow height to fit content */
+    padding: 10px; /* Add padding */
+    background-color: #fff;
+    font-family: sans-serif;
+    z-index: 1000;
+    display: flex; /* Make the container a flexbox */
+    align-items: flex-start; /* Align items at the top */
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    box-sizing: border-box;
+    gap: 10px; /* Add spacing between elements */
+    overflow-x: hidden; /* Prevent horizontal scrolling on the map */
+    overflow-y: auto;   /* Allow vertical scrolling on the map */
+}
+
+#instructions.active {
+    background-color: #23a523;
+    border-radius: 5px;
+    color: white;
+    display: flex;
+    flex-direction: row; /* Ensure content and toggle are aligned horizontally */
+    align-items: flex-start;
+    height: auto; /* Adjust height to fit content */
+    width: auto;
+}
+
+#toggle-instr {
+    align-self: flex-start; /* Align the button to the top */
+    margin-left: 15px; /* Push the button to the far right */
+    width: auto;
+    height: auto;
+    background-color: #23a523;
+    color: white;
+    font-size: 10px;
+    z-index: 1000;
+    cursor: pointer;
+    border: none;
+    border-radius: 5px;
+    text-align: center;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+#toggle-instr:hover {
+    background-color: #188d18;
+}
+
+#toggle-instr.active {
+    background-color: white;
+    color: #23a523;
+    height: 44.33px;
+}
+
+#toggle-instr.active:hover {
+    background-color: #ccc; /* Light grey on hover for active button */
+    color: #23a523;
+}
+
+/* Instruction tabs */
+.tabs {
+    display: flex;
+}
+
+.tab-button {
+    padding: 10px;
     background-color: #007bff; /* Blue background */
     color: white; /* White text */
-  }
-  
-  #clear-markers:disabled {
-    background-color: #e0e0e0; /* Greyed out when disabled */
-    color: #0266d2; /* Blue text */
-    cursor: not-allowed;
-  }
-  
+    border: 1px solid #007bff; /* Blue border */
+    border-radius: 5px;
+    cursor: pointer;
+    margin-right: 5px;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.tab-button-active {
+    background-color: white; /* White background */
+    color: #007bff; /* Blue text */
+    border: 2px solid #007bff; /* Blue border */
+}
+
+.tab-button-inactive {
+    background-color: #007bff; /* Blue background */
+    color: white; /* White text */
+    border: 2px solid #007bff; /* Blue border */
+}
+
+.tab-button:hover {
+    background-color: white; /* Darker blue on hover */
+    color: #007bff;
+    border: 2px solid #007bff; /* Blue border */
+}
+
+.tab-content {
+    border: 0px solid #ccc;
+    padding: 10px;
+    overflow-y: auto;
+}
