@@ -10,8 +10,8 @@ password = 'buhh1927'	#WiFi password
 SERVER_IP = "192.168.230.96"  # Webserver IP
 SERVER_PORT = 8765	# Webserver port, different from web application port
 
-JETSON_IP = "192.168.167.167"	#Jetson IP
-JETSON_PORT = 5000	#Jetson port
+JETSON_IP = "192.168.230.167"	#Jetson IP
+JETSON_PORT = 8888	#Jetson port
 
 # Global client_socket variable
 client_socket = None	#Webserver client socket
@@ -23,10 +23,15 @@ def connect_to_wifi():
     wlan.active(True)
     wlan.connect(ssid, password)
     
+    # Get the MAC address
+    mac_address = wlan.config('mac')
+    formatted_mac = ':'.join('{:02x}'.format(b) for b in mac_address)
+    
     while not wlan.isconnected():
         print("Connecting to Wi-Fi...")
         time.sleep(1)
-    
+        
+    print("MAC Address:", formatted_mac)    
     print("Connected to Wi-Fi:", wlan.ifconfig())
 
 def connect_to_socket():
@@ -45,3 +50,4 @@ def connect_to_jetson():
 
 #connect_to_wifi()
 #connect_to_socket()
+#connect_to_jetson()
