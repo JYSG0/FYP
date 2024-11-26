@@ -13,6 +13,29 @@ import os
 import pyrealsense2
 from realsense_depth import *
 from ultralytics.utils.plotting import Annotator, colors
+import Jetson.GPIO as GPIO
+import busio
+import board
+import digitalio
+import adafruit_ads1x15.ads1115 as ADS
+from adafruit_ads1x15.analog_in import AnalogIn
+
+# list_board_pins()
+
+i2c=busio.I2C(board.SCL_1, board.SDA_1)
+time.sleep(0.1)  # Small delay to stabilize the connection
+ads=ADS.ADS1115(i2c, address=0x48)
+
+chan1 = AnalogIn(ads, ADS.P0)
+chan2=AnalogIn(ads, ADS.P3)
+print(chan1.value, chan1.voltage)
+print(chan2.value, chan2.voltage)
+
+
+# Function to map chan1 value to a specific range (e.g., 10 to 100)
+def map_potentiometer_value(value, input_min=0, input_max=26230, output_min=0, output_max=1023):
+    return ((value - input_min) * (output_max - output_min)) / (input_max - input_min) + output_min
+
 # Global variable to track drivable area detection and object detection
 
 run_detection = True
@@ -22,6 +45,15 @@ esp = True
 #object detection class_id
 class_ids=[]
 
+#Initialise GPIO Pins
+pwm = digitalio.DigitalInOut(board.D12)
+steering = digitalio.DigitalInOut(board.D13)
+pwm.direction = digitalio.Direction.OUTPUT
+steering.direction = digitalio.Direction.OUTPUT
+
+#Initial Low 
+pwm.value = True  # Set GPIO12 high
+steering.value = True  # Set GPIO13 low
 
 # global cap for camera
 cap = DepthCamera()
@@ -188,10 +220,16 @@ odrv0.axis0.controller.config.input_mode = 2 #Vel Mode
 odrv0.axis0.requested_state = 8  # Start Motor
 odrv0.axis1.requested_state = 8 # Start Motor
 
-calibration(odrv0, duration=20)
 
 def Manual_drive(keys):
         global Steering
+
+          # Read potentiometer value
+        try:
+            pot_value = map_potentiometer_value(chan1.value)
+        except OSError as e:
+            print(f"Error reading potentiometer: {e}")
+    
         # 'e' key to start motor
         if keys[pygame.K_e]:  
             print("Starting...")
@@ -200,21 +238,14 @@ def Manual_drive(keys):
 
         # 'w' key to move forward
         if keys[pygame.K_w]:
-            odrv0.axis1.controller.input_vel = 0 #Stop Wheels before moving forward
-            odrv0.axis0.controller.input_vel = 0 
-
-            if odrv0.axis0.controller.input_vel == 0:
-                odrv0.axis1.controller.input_vel = 2
-                odrv0.axis0.controller.input_vel = -2
-                print ('FORWARD')
+            odrv0.axis1.controller.input_vel = 2
+            odrv0.axis0.controller.input_vel = 2   
+            print ('FORWARD')
         # 's' key to move backwards
         if keys[pygame.K_s]:
-            odrv0.axis1.controller.input_vel = 0 #Stop Wheels before moving backwards
-            odrv0.axis0.controller.input_vel = 0
-            if odrv0.axis0.controller.input_vel == 0:
-                odrv0.axis1.controller.input_vel = -2
-                odrv0.axis0.controller.input_vel = 2
-                print ('BACKWARD')
+            odrv0.axis1.controller.input_vel = -2
+            odrv0.axis0.controller.input_vel = -2      
+            print ('BACKWARD')
 
         # 'shift' key to brake
         mods = pygame.key.get_mods()  # Get current modifier key states
@@ -223,24 +254,29 @@ def Manual_drive(keys):
             odrv0.axis0.controller.input_vel = 0
             print ('STOP')
 
-        #'a' is pressed
-        if keys[pygame.K_a]:  # Steer Left
-            # GPIO.output(pwm, GPIO.LOW)
-            # GPIO.output(steering, GPIO.HIGH)
-            print ('LEFT')
+                #'a' is pressed
+        if keys[pygame.K_a] and pot_value <= 800:  # Steer Left
+            pwm.value = False
+            steering.value = True
+            if pot_value is not None:
+                print(f"Steering Left: Potentiometer Value: {pot_value}")
             Steering = True
 
         #'d' is pressed
-        if keys[pygame.K_d]:  # Steer Right
-            # GPIO.output(pwm, GPIO.LOW)
-            # GPIO.output(steering, GPIO.LOW) 
-            print('RIGHT')
+        if keys[pygame.K_d] and pot_value >= 300:  # Steer Right
+            pwm.value = False
+            steering.value = False
+            if pot_value is not None:
+                print(f"Steering Right: Potentiometer Value: {pot_value}")
             Steering = True
 
-        if not keys[pygame.K_a] and not keys[pygame.K_d]:  # Joystick IDLE
-            # GPIO.output(pwm, GPIO.HIGH)
-            # GPIO.output(steering, GPIO.HIGH)
-            Steering = False
+        if not keys[pygame.K_a] and not keys[pygame.K_d]: # Joystick IDLE
+            pwm.value = True
+            steering.value = True
+            if pot_value is not None:
+                print(f"No Steering: Potentiometer Value: {pot_value}")
+
+        return pot_value
 
 # def server_program():
 #     # Receive data
@@ -259,22 +295,17 @@ def Manual_drive(keys):
 #         odrv0.axis0.requested_state = 8  # Activate ODrive axis 0
 #         odrv0.axis1.requested_state = 8  # Activate ODrive axis 1
     
-#     elif data =="forward" and esp:
-#         odrv0.axis1.controller.input_vel = 0 #Stop Wheels before moving forward
-#         odrv0.axis0.controller.input_vel = 0  
-#         if odrv0.axis0.controller.input_vel == 0:
-#             odrv0.axis1.controller.input_vel = 2
-#             odrv0.axis0.controller.input_vel = -2
-#             print ('FORWARD')
+    # elif data =="forward" and esp:
+    #     odrv0.axis1.controller.input_vel = -2
+    #     odrv0.axis0.controller.input_vel = -2
+    #     print ('FORWARD')
 
-#     elif data =="backward" and esp:
-#         odrv0.axis1.controller.input_vel = 0 #Stop WHeels before moving backwards
-#         odrv0.axis0.controller.input_vel = 0
 
-#         if odrv0.axis0.controller.input_vel == 0:
-#             odrv0.axis1.controller.input_vel = -2
-#             odrv0.axis0.controller.input_vel = 2
-#             print ('BACKWARD')
+    # elif data =="backward" and esp:
+    #     odrv0.axis1.controller.input_vel = 2
+    #     odrv0.axis0.controller.input_vel = 2
+    #     print ('BACKWARD')
+        
 
 #     elif data == "stop" and esp:
 #         print("Stopping motor...")
@@ -328,12 +359,12 @@ def main():
  
             elif 6 in class_ids or 7 in class_ids:
                 print("Slow")
-                odrv0.axis1.controller.input_vel = 1
+                odrv0.axis1.controller.input_vel = -1
                 odrv0.axis0.controller.input_vel = -1
 
             if 1 in class_ids or 3 in class_ids:
                 print("Pedestrain")
-                odrv0.axis1.controller.input_vel = 1
+                odrv0.axis1.controller.input_vel = -1
                 odrv0.axis0.controller.input_vel = -1
                 if 4 in class_ids:
                     print("Stop")
@@ -341,12 +372,16 @@ def main():
                     odrv0.axis0.controller.input_vel = 0
                 else:
                     print("Continue")
-                    odrv0.axis1.controller.input_vel = 2
+                    odrv0.axis1.controller.input_vel = -2
                     odrv0.axis0.controller.input_vel = -2
 
         elif not Auto_driving:
             Manual_drive(keys)
 
+            pot_value = Manual_drive(keys)
+
+            if pot_value == None:
+                continue
         # If recording, write the frame to the video output file
         if recording:
             out_annotated.write(annotated_frame)
