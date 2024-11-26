@@ -51,6 +51,7 @@ previousRouteActive = False
 
 lon = [-74.004288, -74.004917, -74.006252, -74.006204, -74.006415, -74.00735]
 lat = [40.713123, 40.713438, 40.714023, 40.714127, 40.714225, 40.713103]
+message = ['test', 'test1', 'start', 'forward', 'backward', 'stop','start', 'forward', 'backward', 'stop']
 
 #Calibrate compass
 def calibrateCompass():
@@ -435,28 +436,22 @@ def followInstructions(modifiers, instructions, turns, direction, bearingAfter, 
 
 #Send message to Jetson to move vehicle
 def moveVehicle(msg):
-    global client_socket_jetson
-    
-    if client_socket_jetson is None:
-        print("Jetson connection not established. Trying to reconnect...")
-        boot.connect_to_jetson()
-    
-    if client_socket_jetson:
+    if boot.client_socket_jetson:
         try:
             #Send message
-            client_socket_jetson.send(msg.encode())
+            boot.client_socket_jetson.send(msg.encode())
             print("Sent:", msg)
             
             #Wait for response
-            response = client_socket_jetson.recv(1024).decode()
+            response = boot.client_socket_jetson.recv(1024).decode()
             print("Received from Jetson:", response)
             
             #Delay before the next message
             time.sleep(5)
         except socket.error as e:
             print(f"Communication error: {e}")
-            client_socket_jetson.close()
-            client_socket_jetson = None
+            boot.client_socket_jetson.close()
+            boot.client_socket_jetson = None
             time.sleep(5)  #Wait before sending another message
 
 #Main loop
@@ -471,7 +466,7 @@ def main():
     
     boot.connect_to_wifi()
     boot.connect_to_socket()
-    #boot.connect_to_jetson()
+    boot.connect_to_jetson()
     reset_coordinates()
     #calibrateCompass()
     
@@ -488,6 +483,7 @@ def main():
                     receiveRouteActive()
                     latitude = lat[step]
                     longitude = lon[step]
+                    msg = message[step]
                     azimuth = 57.06517
                     azimuth = round(azimuth, 4)
                     direction = qmc5883.get_cardinal_direction(azimuth)
@@ -507,7 +503,7 @@ def main():
                         time.sleep(2)
                         sendTestStep()
                         
-                        #moveVehicle(msg)
+                        moveVehicle(msg)
                         
                         #Check for route stop
                         if not routeActive and previousRouteActive:  #routeActive was True, now it's False
