@@ -4,13 +4,29 @@ import time
 import math
 import machine
 import json
+import asyncio
+import aioble
+import bluetooth
 from micropyGPS import MicropyGPS
+import ujson
+from micropython import const
 from machine import I2C, Pin
 from qmc5883L import QMC5883L
-import boot
+import struct
 
-#Start receiving routeActive status in the background
-#import _thread
+_BLE_SERVICE_UUID = bluetooth.UUID('19b10000-e8f2-537e-4f6c-d104768a1214')
+_BLE_SENSOR_CHAR_UUID = bluetooth.UUID('19b10001-e8f2-537e-4f6c-d104768a1214')  # GPS Data UUID
+_BLE_LED_UUID = bluetooth.UUID('19b10002-e8f2-537e-4f6c-d104768a1214')
+
+_ADV_INTERVAL_MS = 250_000
+
+# Register GATT service and characteristics
+ble_service = aioble.Service(_BLE_SERVICE_UUID)
+sensor_characteristic = aioble.Characteristic(ble_service, _BLE_SENSOR_CHAR_UUID, read=True, notify=True)
+led_characteristic = aioble.Characteristic(ble_service, _BLE_LED_UUID, read=True, write=True, notify=True, capture=True)
+
+# Register services
+aioble.register_services(ble_service)
 
 #Instantiate the micropyGPS object
 my_gps = MicropyGPS()
@@ -51,6 +67,10 @@ previousRouteActive = False
 
 lon = [-74.004288, -74.004917, -74.006252, -74.006204, -74.006415, -74.00735]
 lat = [40.713123, 40.713438, 40.714023, 40.714127, 40.714225, 40.713103]
+latitude = 40.713123
+longitude = -74.004288
+azimuth = 20
+direction = 'North'
 message = ['test', 'test1', 'start', 'forward', 'backward', 'stop','start', 'forward', 'backward', 'stop']
 
 #Calibrate compass
@@ -117,141 +137,6 @@ def reset_coordinates():
     endLat = 0.0    #or your desired initial value
     endLon = 0.0    #or your desired initial value
     print(f"Coordinates reset to Start: ({startLat}, {startLon}), Destination: ({endLat}, {endLon})")
-
-#Send current coords using socket
-def sendCurrentCoords(latitude, longitude, azimuth, direction):
-    if boot.client_socket is None:
-        print("Error: boot.client_socket is not initialized.")
-        return  #Exit the function if client_socket is None
-    #Format message to indicate this is a coordinates update
-    payload = {
-        "type": "Coords",	#Short for coordinates
-        "latitude": latitude,
-        "longitude": longitude,
-        "azimuth": azimuth,
-        "direction": direction
-    }
-    print(payload)
-    #Convert the dictionary to a JSON string and then encode it to bytes
-    message = json.dumps(payload).encode()
-    #Send the message over socket
-    boot.client_socket.send(message)
-    print("Sent:", message)
-    #Receive a response from the server for checking
-    response = boot.client_socket.recv(1024).decode()
-    print("Received from server:", response)
-
-#Use socket to receive routeActive command
-def receiveRouteActive():
-    global routeActive
-    url = f'http://{SERVER_IP}:{port}/get-routeActive'  #Adjust the IP as needed
-    try:
-        response = urequests.get(url)
-        if response.status_code == 200:
-            data = response.json()	#Parse the JSON data
-            routeActive = data.get("routeActive")
-            print(f"routeActive: {routeActive}")
-        response.close()
-    except Exception as e:
-        print(f"Error fetching routeActive: {e}")
-
-def receiveRouteData():
-    global startLat, startLon, endLat, endLon
-    url = f'http://{SERVER_IP}:{port}/get-routeData'  #Adjust the IP as needed
-    print(url)
-    response = urequests.get(url)
-    try:
-        if response.status_code == 200:
-            data = response.json()	#Parse the JSON data
-            
-            #Extract attributes
-            startLat = data.get('startLat')
-            startLon = data.get('startLon')
-            endLat = data.get('endLat')
-            endLon = data.get('endLon')
-            
-            print(f"Start Latitude: {startLat}, Start Longitude: {startLon}")
-            print(f"End Latitude: {endLat}, End Longitude: {endLon}")
-            
-            return startLat, startLon, endLat, endLon  #Return the values if needed
-        else:
-            print(f"Error getting route data: {response.status_code}")
-    except Exception as e:
-        print(f"An error occurred while fetching route data: {e}")
-    return None, None, None, None  #Return None if there's an error
-
-def receiveNavData():
-    global turningPoints, instructions, turnProperties, bearingAfter, modifiers, turns
-    url = f'http://{SERVER_IP}:{port}/get-navData'  #Adjust the IP as needed
-    print(url)
-    response = urequests.get(url)
-    try:
-        if response.status_code == 200:
-            data = response.json()	#Parse the JSON data
-            
-            turningPoints = data.get('waypoints')
-            instructions = data.get('instructions')
-            turnProperties = data.get('turnProperties')
-            print(f"Turning points: {turningPoints}, Instructions: {instructions}, turnPropertiess: {turnProperties}")
-            
-            for element in turnProperties:
-                bearingAfter.append(element['bearingAfter'])
-                modifiers.append(element['modifier'])
-                turns.append(element['turns'])
-            
-            return turningPoints, turnProperties, bearingAfter, modifiers, turns, instructions
-        else:
-            print(f"Error getting nav data: {response.status_code}")
-    except Exception as e:
-        print(f"An error occurred while fetching nav data: {e}")
-    return None, None, None, None  #Return None if there's an error
-
-#Receive bearing with locations using HTTP
-def receive_routeBearing_from_flask():
-    try:
-        url = f'http://{SERVER_IP}:{port}/get_bearingWLocations'  #Adjust the IP as needed
-        response = urequests.get(url)
-        if response.status_code == 200:
-            bearingWLocations = response.json()
-            return bearingWLocations
-        else:
-            print('Failed to fetch coordinates. Status code:', response.status_code)
-            return None
-    except Exception as e:
-        print('Error fetching coordinates:', e)
-        return None
-
-#Send vehicle current step/instruction using HTTP
-def sendCurrentStep(action):
-    #Format message to indicate this is a coordinates update
-    payload = {
-        "type": "action",	#Short for coordinates
-        "action": action
-    }
-    #Convert the dictionary to a JSON string and then encode it to bytes
-    message = json.dumps(payload).encode()
-    #Send the message over socket
-    boot.client_socket.send(message)
-    print("Sent:", message)
-    #Receive a response from the server for checking
-    response = boot.client_socket.recv(1024).decode()
-    print("Received from server:", response)
-    
-def sendTestStep():
-    global step
-    payload = {
-        "type": "testStep",	#Short for coordinates
-        "testStep": step
-    }
-    #Convert the dictionary to a JSON string and then encode it to bytes
-    message = json.dumps(payload).encode()
-    #Send the message over socket
-    boot.client_socket.send(message)
-    print("Sent:", message)
-    step+=1
-    #Receive a response from the server for checking
-    response = boot.client_socket.recv(1024).decode()
-    print("Received from server:", response)
 
 #Check if vehicle orientation is right before mobing onto next step
 def checkAngleCorrection(azimuth, target_bearing, threshold):
@@ -429,34 +314,32 @@ def followInstructions(modifiers, instructions, turns, direction, bearingAfter, 
             msg = "Go straight"
             print(action)
         
-        #sendCurrentStep(action)
+        await sensor_characteristic.write(action)
         moveVehicle(msg)	#Function to actually move vehicle according to action
         
     return currentStep, reachedDestination
 
 #Send message to Jetson to move vehicle
 def moveVehicle(msg):
-    if boot.client_socket_jetson:
-        try:
-            #Send message
-            boot.client_socket_jetson.send(msg.encode())
-            print("Sent:", msg)
+    data = {
+        'type': 'msg',  # The action you want the vehicle to perform
+        'msg': msg  # Any other data you want to send
+    }
+    await sensor_characteristic.write(data)
             
-            #Wait for response
-            response = boot.client_socket_jetson.recv(1024).decode()
-            print("Received from Jetson:", response)
-            
-            #Delay before the next message
-            time.sleep(5)
-        except socket.error as e:
-            print(f"Communication error: {e}")
-            boot.client_socket_jetson.close()
-            boot.client_socket_jetson = None
-            time.sleep(5)  #Wait before sending another message
+#Helper to encode GPS data, including azimuth and direction
+def formatGPSdata(latitude, longitude, azimuth, direction):
+    gps_data = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "azimuth": azimuth,
+        "direction": direction
+    }
+    return ujson.dumps(gps_data).encode('utf-8')
 
 #Main loop
-def main():
-    global latitude, longitude, azimuth, direction, startLat, startLon, endLat, endLon
+def prepare():
+    global latitude, longitude, azimuth, direction, startLat, startLon, endLat, endLon, lat, lon
     global currentStep, reachedDestination, modifiers, bearingAfter, turns, step, matchedBearing, routeActive, previousRouteActive
     i = 0
     step = 0
@@ -464,77 +347,180 @@ def main():
     routeActive = False	#Initialise it to False at the start
     previousRouteActive = False
     
-    boot.connect_to_wifi()
-    boot.connect_to_socket()
-    boot.connect_to_jetson()
-    reset_coordinates()
+    # Run the main task
     #calibrateCompass()
-    
-    #_thread.start_new_thread(receiveRouteActive, ())	#Start background thread to receive routeActive status
-    
+
+data_buffer = bytearray()
+
+# Function to decode and process the received JSON data
+def _decode_data(data):
+    try:
+        print(f"Decoding JSON data: {data}")
+        # Process the JSON data (e.g., control LED based on data)
+        json_data = ujson.loads(data)
+        print(f"Decoded JSON: {json_data}")
+        formatJSONbleak(json_data)
+    except Exception as e:
+        print(f"Error decoding received data: {e}")
+
+# Task to handle incoming writes (handling fragmentation)
+async def wait_for_write():
     while True:
         try:
-        #data = gps_serial.read()
-            #for byte in data:
-                #stat = my_gps.update(chr(byte))
-                #if stat is not None:
-                    #Compass
-                    #azimuth, direction = readCompass()
-                    receiveRouteActive()
-                    latitude = lat[step]
-                    longitude = lon[step]
-                    msg = message[step]
-                    azimuth = 57.06517
-                    azimuth = round(azimuth, 4)
-                    direction = qmc5883.get_cardinal_direction(azimuth)
-                    if step >= len(lat):
-                        step = 0  #Reset index to start over
-                    #GPS logic
-                    #latitude, longitude, satellites, precision = readGPS()
-                        
-                    print(latitude, longitude, azimuth, direction)
-                    sendCurrentCoords(latitude, longitude, azimuth, direction)
-                    print('testStep')
-                    
-                    if not reachedDestination:
-                        startLat, startLon, endLat, endLon = receiveRouteData()
-                        print('received')
-                        
-                        time.sleep(2)
-                        sendTestStep()
-                        
-                        moveVehicle(msg)
-                        
-                        #Check for route stop
-                        if not routeActive and previousRouteActive:  #routeActive was True, now it's False
-                            print("Route stopped. Resetting instructions and turning points.")
-                            turnProperties = 0
-                            instructions = turningPoints = bearingAfter = modifiers = turns = []
-                            previous_routeActive = routeActive
-                            print(turnProperties, instructions, turningPoints, bearingAfter, modifiers, turns)
-
-                        #Continue route if active
-                        elif routeActive:
-                            #Receive navigation data if the route is active
-                            turningPoints, turnProperties, bearingAfter, modifiers, turns, instructions = receiveNavData()
-
-                            #If data is received, continue with navigation
-                            if turningPoints and instructions and turnProperties:
-                                matchedBearing, action, matchedStartBearing = compareBearing(
-                                    instructions, direction, azimuth, turnProperties, bearingAfter
-                                )
-                                
-                                if matchedStartBearing:
-                                    currentStep, reachedDestination = followInstructions(
-                                        modifiers, instructions, turns, direction, bearingWLocations, 
-                                        turningPoints, latitude, longitude, turnProperties
-                                    )
-                                    print(f"Current Step: {currentStep}");
-                        previousRouteActive = routeActive;
-                        time.sleep(0.5)	#delay to not overwhelm esp32
-    
-        except Exception as e:
-            print(f"An error occurred: {e}")
+            # Wait for data to be written to the characteristic
+            connection, data = await led_characteristic.written()
             
-#Run the main loop
-main()
+            if data:
+                is_last_chunk, chunk = struct.unpack("B", data[0:1])[0], data[1:]
+                data_buffer.extend(chunk)  # Add the chunk to the buffer
+
+                print(f"Received chunk, is_last_chunk={is_last_chunk}")
+                
+                # Check if it's the last chunk and if we've received the full message
+                if is_last_chunk:
+                    # Reassemble the full message
+                    full_data = data_buffer.decode('utf-8')
+                    print(f"Full data received: {full_data}")
+                    
+                    # Reset the buffer for future data
+                    data_buffer.clear()
+
+                    # Process the received JSON data
+                    _decode_data(full_data)
+                else:
+                    print("Waiting for more chunks...")
+        except Exception as e:
+            print(f"Error receiving data: {e}")
+
+# Helper to encode GPS data, including azimuth and direction
+def formatGPSdata(latitude, longitude, azimuth, direction):
+    gps_data = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "azimuth": azimuth,
+        "direction": direction
+    }
+    return ujson.dumps(gps_data).encode('utf-8')  # Encode JSON as bytes
+
+# Task to send GPS data periodically
+async def main(connection):
+    global latitude, longitude, azimuth, direction, startLat, startLon, endLat, endLon
+    global currentStep, reachedDestination, modifiers, bearingAfter, turns, step, matchedBearing, routeActive, previousRouteActive
+    routeActive = False
+    previousRouteActive = True
+    currentStep = 0
+
+    try:
+        #data = gps_serial.read()
+        #for byte in data:
+            #stat = my_gps.update(chr(byte))
+            #if stat is not None:
+                #azimuth, direction = readCompass()
+                latitude = lat[step]
+                longitude = lon[step]
+                msg = message[step]
+                azimuth = 57.06517
+                azimuth = round(azimuth, 4)
+                direction = qmc5883.get_cardinal_direction(azimuth)
+                if step >= len(lat):
+                    step = 0  #Reset index to start over
+                #GPS logic
+                #latitude, longitude, satellites, precision = readGPS()
+                    
+                print(latitude, longitude, azimuth, direction)
+                gps_data = formatGPSdata(latitude, longitude, azimuth, direction)
+                if sensor_characteristic is not None:
+                # Send the encoded GPS data
+                    try:
+                        print(f"Sending GPS data: {latitude}, {longitude}, {azimuth}, {direction}")  # Debugging log
+                        print(gps_data)
+                        await sensor_characteristic.write(gps_data)
+                        #await sensor_characteristic.write(currentStep)
+                        
+                    except Exception as e:
+                        print(f"GPS data: {gps_data}")
+                        print(f"Error sending GPS data: {e}")
+                else:
+                    print("Error: sensor_characteristic is None.")
+                    print('testStep')
+                
+                if not reachedDestination:
+                    print('received')
+                    
+                    time.sleep(2)
+                    #await sensor_characteristic.write(currentStep)
+                    
+                    #moveVehicle(msg)
+                    
+                    #Check for route stop
+                    if not routeActive and previousRouteActive:  #routeActive was True, now it's False
+                        print("Route stopped. Resetting instructions and turning points.")
+                        turnProperties = 0
+                        #instructions = turningPoints = bearingAfter = modifiers = turns = []
+                        #previous_routeActive = routeActive
+                        #print(turnProperties, instructions, turningPoints, bearingAfter, modifiers, turns)
+
+                    #Continue route if active
+                    elif routeActive:
+                        #Receive navigation data if the route is active
+                        print("turningPOints")
+                        #turningPoints, turnProperties, bearingAfter, modifiers, turns, instructions = receiveNavData()
+
+                        #If data is received, continue with navigation
+                        if turningPoints and instructions and turnProperties:
+                            matchedBearing, action, matchedStartBearing = compareBearing(
+                                instructions, direction, azimuth, turnProperties, bearingAfter
+                            )
+                            
+                            if matchedStartBearing:
+                                currentStep, reachedDestination = followInstructions(
+                                    modifiers, instructions, turns, direction, bearingWLocations, 
+                                    turningPoints, latitude, longitude, turnProperties
+                                )
+                                print(f"Current Step: {currentStep}");
+                    previousRouteActive = routeActive;
+                    time.sleep(0.5)	#delay to not overwhelm esp32
+
+    except Exception as e:
+            print(f"An error occurred: {e}")
+
+# Peripheral task to advertise BLE service
+async def peripheral_task():
+    while True:
+        try:
+            async with await aioble.advertise(
+                _ADV_INTERVAL_MS,
+                name="ESP32-GPS",
+                services=[_BLE_SERVICE_UUID],
+            ) as connection:
+                if connection:
+                    print(f"Connection established with {connection.device}")
+                    # Set the on_write handler for the LED characteristic
+                    while connection is not None:
+                        if connection.is_connected():
+                            await main(connection)
+                    
+                    # Wait for the connection to disconnect
+                    await connection.disconnected()
+                    print("Connection disconnected.")
+                else:
+                    print("Failed to establish connection")
+        except asyncio.CancelledError:
+            print("Peripheral task cancelled")
+        except Exception as e:
+            print("Error in peripheral_task:", e)
+        finally:
+            await asyncio.sleep_ms(100)  # Allow some time before retrying
+
+# Main task
+async def bootTask():
+    # Start advertising and GPS data task
+    t1 = asyncio.create_task(peripheral_task())  # BLE peripheral task
+    t3 = asyncio.create_task(wait_for_write())
+    # Set the `on_write` handler to process incoming writes to the characteristic
+    await asyncio.gather(t1)
+
+#Initialise variables and call functions that run once
+prepare
+# Run the event loop
+asyncio.run(bootTask())
