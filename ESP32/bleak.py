@@ -1,3 +1,4 @@
+#DEVICE_ADDRESS = "88:13:BF:6F:E0:B6"
 import asyncio
 from bleak import BleakClient
 import json
@@ -21,25 +22,54 @@ async def list_services(client):
 
 async def read_sensor_data(client):
     try:
-        data = await client.read_gatt_char(SENSOR_CHAR_UUID)
-        if data:
-            value = data.decode("utf-8")
-            jsondata = json.loads(value)
-            print(f"Received sensor data: {jsondata}")
-            return jsondata
+        sensor_data = await client.read_gatt_char(SENSOR_CHAR_UUID)
+        print(f"Sensor Data: {sensor_data.decode('utf-8')}")
     except Exception as e:
         print(f"Error reading sensor data: {e}")
-    return None
+# Function to decode and process the received JSON data
+def _decode_data(data):
+    # Convert the large number to bytes (if it's a string in the original data)
+    num_bytes = data.to_bytes((data.bit_length() + 7) // 8, 'big')
 
-async def send_sensor_data(client, message):
     try:
-        data = message.encode("utf-8")
-        print(f"Payload size: {len(message)} bytes")
-        print(data)
-        await client.write_gatt_char(LED_UUID, data)
-        print(f"Sent to ESP32: {message}")
+        # Decode bytes to string (assuming UTF-8 encoding)
+        json_str = num_bytes.decode('utf-8')
+        print("Decoded JSON String:", json_str)
+
+        # Load JSON data
+        json_data = json.loads(json_str)
+        print("Decoded JSON Data:", json_data)
+        
+        return json_data
     except Exception as e:
-        print(f"Error sending to ESP32: {e}")
+        print(f"Error decoding the large number: {e}")
+        return None
+
+async def send_sensor_data(client, json_data):
+    try:
+        json_bytes = json_data.encode('utf-8')  # Convert JSON to bytes
+        chunk_size = 20  # Maximum number of bytes per chunk (BLE limit)
+        total_chunks = len(json_bytes) // chunk_size + (1 if len(json_bytes) % chunk_size else 0)
+        
+        for i in range(total_chunks):
+            start_idx = i * chunk_size
+            end_idx = start_idx + chunk_size
+            chunk = json_bytes[start_idx:end_idx]
+            
+            # Indicate if it's the last chunk
+            is_last_chunk = 1 if i == total_chunks - 1 else 0
+            
+            # Prepare the chunk with metadata (start/end indicator)
+            chunk_with_metadata = bytes([is_last_chunk]) + chunk
+            
+            # Send the chunk
+            await client.write_gatt_char(LED_UUID, chunk_with_metadata)
+            print(f"Sent chunk {i + 1}/{total_chunks}")
+            
+            await asyncio.sleep(0.1)  # Small delay between chunks
+
+    except Exception as e:
+        print(f"Error sending JSON in chunks: {e}")
 
 async def main():
     async with BleakClient(DEVICE_ADDRESS) as client:
@@ -56,9 +86,11 @@ async def main():
                     try:
                         response = await asyncio.wait_for(websocket.recv(), timeout=0.5)
                         print(f"Received from WebSocket: {response}")
-
+                        
+                        JSONdata = json.dumps(response)
+                        print("Sending large JSON data in chunks...")
                         # if "startLat" in response or "attributes" in response or "routeActive" in response:
-                        await send_sensor_data(client, response)
+                        await send_sensor_data(client, JSONdata)
                     except asyncio.TimeoutError:
                         pass  # No message received; continue loop
                     
