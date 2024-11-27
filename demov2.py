@@ -31,6 +31,7 @@ from lib.core.postprocess import morphological_process, connect_lane
 from tqdm import tqdm
 
 from scipy.spatial.distance import cdist
+import math
 
 normalize = transforms.Normalize(
         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
@@ -71,10 +72,12 @@ class YOLOP:
         self.is_recording = False
         self.vid_writer = None
 
+
     def detect(self):
         cfg = self.cfg
         opt = self.opt
-
+        y = 600
+        point = False
         logger, _, _ = create_logger(
             cfg, cfg.LOG_DIR, 'demo')
 
@@ -162,140 +165,123 @@ class YOLOP:
             _, ll_seg_mask = torch.max(ll_seg_mask, 1)
             ll_seg_mask = ll_seg_mask.int().squeeze().cpu().numpy()
             # Lane line post-processing
-            # ll_seg_mask = morphological_process(ll_seg_mask, kernel_size=7, func_type=cv2.MORPH_OPEN)
-            # ll_seg_mask = connect_lane(ll_seg_mask)
+            #ll_seg_mask = morphological_process(ll_seg_mask, kernel_size=7, func_type=cv2.MORPH_OPEN)
+            #ll_seg_mask = connect_lane(ll_seg_mask)
 
             img_det = show_seg_result(img_det, (da_seg_mask, ll_seg_mask), _, _, is_demo=True)
 
+            # Draw the red dot
+            dot_color = (255, 0, 255)  # BGR for red
+            dot_radius = 5  # Radius of the dot
+            cv2.circle(img_det, (640, 715), dot_radius, dot_color, -1)  # -1 to fill the circle
+
             # Extract lane pixels from the mask
             lane_pixels = np.argwhere(ll_seg_mask > 0)
-
-            # Extract the x-values of the lane pixels
-            x_values = lane_pixels[:, 1]  # Extract x-coordinates
-            y_values = lane_pixels[:, 0]  # Extract y-coordinates (optional if needed)
-
-            # Sort lane_pixels based on y-values to ensure proper order
-            sorted_indices = np.argsort(y_values)
-            x_values = x_values[sorted_indices]
-            y_values = y_values[sorted_indices]
-
-            # Compute the differences between consecutive x-values
-            x_differences = np.abs(np.diff(x_values))
-
-            # Define a threshold for detecting sudden changes in x-values
-            threshold = 100  # Adjust this threshold as needed
-
-            # Identify where the differences exceed the threshold
-            lane_change_indices = np.where(x_differences > threshold)[0]
-
-            # Check if multiple lanes are detected
-            if len(lane_change_indices) > 0:
-                print("Multiple lanes detected!")
-                for pixel in lane_pixels:
-                    y, x = pixel  # Row (y) and column (x) of the pixel
-                    print(f"Lane pixel at (x={x}, y={y})")
-                    # Convert to a numpy array for easier processing
-                    lane_pixels = np.array(lane_pixels)
-
-                    # # Sort by the x-coordinate
-                    # lane_pixels = lane_pixels[lane_pixels[:, 1].argsort()]
-
-                    # # Threshold to determine whether to start a new group
-                    # x_threshold = 60
-
-                    # # Separate into clusters
-                    # clusters = []
-                    # current_cluster = [lane_pixels[0]]  # Start with the first pixel
-
-                    # for i in range(1, len(lane_pixels)):
-                    #     if abs(lane_pixels[i][1] - lane_pixels[i - 1][1]) > x_threshold:
-                    #         # Start a new cluster
-                    #         clusters.append(current_cluster)
-                    #         current_cluster = [lane_pixels[i]]
-                    #     else:
-                    #         # Add to the current cluster
-                    #         current_cluster.append(lane_pixels[i])
-
-                    # # Add the last cluster
-                    # if current_cluster:
-                    #     clusters.append(current_cluster)
-
-                    # # Convert each cluster back to a list of lists
-                    # clusters = [np.array(cluster).tolist() for cluster in clusters]
-                    import matplotlib.pyplot as plt
-                    from sklearn.cluster import DBSCAN
-
-                    # DBSCAN clustering
-                    db = DBSCAN(eps=60, min_samples=5).fit(lane_pixels)
-                    labels = db.labels_
-                    print("number of clusters:",len(set(labels)))
-                    plt.figure()
-                    plt.scatter(lane_pixels[:,0],lane_pixels[:,1], c= labels)
-                    plt.show()
-                    # # Organize points into clusters
-                    # clusters = []
-                    # unique_labels = set(labels)
-                    # for label in unique_labels:
-                    #     if label != -1:  # Exclude noise points
-                    #         # Find indices where the label matches
-                    #         cluster_indices = np.where(labels == label)[0]
-                    #         clusters[label] = lane_pixels[cluster_indices].tolist()
-                    #     print(f"DBSCAN Clusters: {clusters}")
-
-                    # import csv
-
-                    # # Save to CSV
-                    # csv_file = "dynamic_lane_clusters.csv"
-                    # with open(csv_file, "w", newline="") as f:
-                    #     writer = csv.writer(f)
                         
-                    #     # Write headers
-                    #     headers = [f"Cluster {i+1}" for i in range(len(clusters))]
-                    #     writer.writerow(headers)
+            # Original resolution
+            old_width, old_height = 1920, 2440
+
+            # New resolution
+            new_width, new_height = 1280, 720
+
+            # Scale factors
+            width_scale = new_width / old_width
+            height_scale = new_height / old_height
+
+            # Lane pixels at original resolution
+            lane_pixels = np.argwhere(ll_seg_mask > 0)
+
+            # Scale the coordinates
+            scaled_lane_pixels = np.round(lane_pixels * [height_scale, width_scale]).astype(int)
+
+            # Group by unique y-values
+            lanes_by_y = {}
+            for y, x in scaled_lane_pixels:
+                if y not in lanes_by_y:
+                    lanes_by_y[y] = []
+                lanes_by_y[y].append(x)
+
+            # Determine the two nearest x-values for each y-value
+            for y, x_values in lanes_by_y.items():
+                print(y)
+                if y == 600:
+
+                    x_values = lanes_by_y.get(y, [])
+                   
+
+                    # if not x_values:
+                    #     y -= 5
+                    #     continue
+
+                    x_values = np.array(x_values)
+                    # Sort x-values by their distance to middle_x
+                    sorted_x = sorted(x_values, key=lambda x: abs(x - 640))
+
+                    # Initialize x1 and x2
+                    x1, x2 = None, None
+
+                    # Find one x-value below the midpoint and one above
+                    for x in sorted_x:
+                        if x < 640 and x1 is None:
+                            x1 = x
+                        elif x > 640 and x2 is None:
+                            x2 = x
+                        if x1 is not None and x2 is not None:
+                            break
+
+
+                    if x1 is not None and x2 is not None:
+                        # Calculate the midpoint
+                        midpoint = int((x1 + x2) / 2)
+                        # Draw a dot at the midpoint
+                        dot_color1 = (255, 255, 255)  # BGR for magenta
+                        dot_radius1 = 5  # Radius of the dot                       
+
+                        cv2.circle(img_det, (midpoint, y), dot_radius1, dot_color1, -1)  # -1 to fill the circle
+                    
+
+                        # Calculate the distance using the Euclidean formula
+                        distance = math.sqrt((midpoint - 640)**2 + (y - 715)**2)
+                        # Draw the line between the points
+                        cv2.line(img_det, (640, 715), (midpoint, y), (0, 255, 0), 2)  # Green line
+                        # Output the distance
+                        print(f"Distance between the parallel lines: {distance:.2f} units")
+                        # Add distance text
+                        distance_text = f"{distance:.2f} units"
+                        midpoint_text_x = int((640 + midpoint) / 2)
+                        midpoint_text_y = int((715 + y) / 2)
+                        point = True
+                        cv2.putText(img_det, distance_text, (midpoint_text_x + 10, midpoint_text_y - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
                         
-                    #     # Find the longest cluster
-                    #     max_length = max(len(points) for points in clusters.values())
-                        
-                    #     # Write rows
-                    #     for i in range(max_length):
-                    #         row = []
-                    #         for cluster_points in clusters.values():
-                    #             row.append(cluster_points[i] if i < len(cluster_points) else "")
-                    #         writer.writerow(row)
-
-                    # print(f"Clusters saved to {csv_file}")
-
-                    # # Print the clusters
-                    # for idx, cluster in enumerate(clusters):
-                    #     print(f"Cluster {idx + 1}:")
-                    #     for coord in cluster:
-                            # print(f"[x: {coord[1]}, y: {coord[0]}]")  # Format x and y
-                    # # Create a blank image
-                    # img_height, img_width = 1500, 1500
-                    # img1 = np.zeros((img_height, img_width, 3), dtype=np.uint8)
-
-                    # # Colors for clusters
-                    # colors = [(0, 255, 0), (0, 0, 255)]  # Green, Red
-
-                    # # Iterate through clusters and draw lines
-                    # for cluster_idx, cluster in enumerate(clusters):
-                    #     color = colors[cluster_idx % len(colors)]  # Cycle through colors if more clusters
-                    #     for i in range(len(cluster) - 1):  # Loop through each consecutive point
-                    #         pt1 = (cluster[i][1], cluster[i][0])   # (x, y)
-                    #         pt2 = (cluster[i + 1][1], cluster[i + 1][0])  # (x, y)
-                    #         cv2.line(img1, pt1, pt2, color, thickness=2)  # Draw line between consecutive points
-                    #     # Show the image
-                    #     cv2.imshow('Lines from Clusters', img1)
-                    #     cv2.waitKey(1)
-            else:
-                print("No multiple lanes detected.")
+                    # Proceed if valid x1 and x2 are found
+                    elif (x1 is None or x2 is None) and point:
+                        cv2.circle(img_det, (midpoint, y), dot_radius1, dot_color1, -1)  # -1 to fill the circle
+                        # Debug: Print the detected lanes and midpoint
+                        print(f"At y={y}, closest x values: {x1}, {x2}. Midpoint: {midpoint}")
+                        # Calculate the distance using the Euclidean formula
+                        distance = math.sqrt((midpoint - 640)**2 + (y - 715)**2)
+                        # Draw the line between the points
+                        cv2.line(img_det, (640, 715), (midpoint, y), (0, 255, 0), 2)  # Green line
+                        # Output the distance
+                        print(f"Distance between the parallel lines: {distance:.2f} units")
+                        # Add distance text
+                        distance_text = f"{distance:.2f} units"
+                        midpoint_text_x = int((640 + midpoint) / 2)
+                        midpoint_text_y = int((715 + y) / 2)
+                        cv2.putText(img_det, distance_text, (midpoint_text_x + 10, midpoint_text_y - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                        break 
+                                        
+            # If no midpoint was found after trying all y-values
+            if y < 500:
+                print("No valid midpoint found in the specified range.")
 
             if len(det):
                 det[:,:4] = scale_coords(img.shape[2:],det[:,:4],img_det.shape).round()
                 for *xyxy,conf,cls in reversed(det):
                     label_det_pred = f'{names[int(cls)]} {conf:.2f}'
                     plot_one_box(xyxy, img_det , label=label_det_pred, color=colors[int(cls)], line_thickness=2)
-
 
 
             if dataset.mode == 'images':
