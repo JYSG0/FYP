@@ -17,7 +17,7 @@ templates_directory = os.path.join(os.path.dirname(__file__), "template")
 templates = Jinja2Templates(directory=templates_directory)
 
 TCPwriter = None
-currentData = {} #Global variable to store latest data sent to socket
+ #Global variable to store latest data sent to socket
 currentStep = {}
 action = {}
 routeActive = {}
@@ -27,6 +27,13 @@ routeCoords = {
     "startLon": None,
     "endLat": None,
     "endLon": None,
+}
+
+currentCoords = {
+    "currentLat": None,
+    "currentLon": None,
+    "azimuth": None,
+    "direction": None
 }
 
 instructions = []
@@ -51,9 +58,29 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             print(f"Received message from WebSocket: {data}")
             
-            message = json.loads(data)
+            #Decode outer JSON string
+            firstMessage = json.loads(data)
+            print(firstMessage)
+            print(f"Type of data: {type(firstMessage)}")
 
-            if "startLat" in message:
+            if isinstance(firstMessage, str):
+                print("Parsed message is not a dictionary")
+                message = json.loads(firstMessage)
+                print(message)
+                print(f"Type of data: {type(message)}")
+            else:
+                message = firstMessage
+                print(message)
+
+            if "latitude" in message:
+                print("latitude")
+                currentCoords["currentLat"] = message["latitude"]
+                currentCoords["currentLon"] = message["longitude"]
+                currentCoords["azimuth"] = message["azimuth"]
+                currentCoords["direction"] = message["direction"]
+                print(f"Updated current coordinates: {currentCoords['currentLat']}, {currentCoords['currentLon']}, {currentCoords['azimuth']}, {currentCoords['direction']}")
+
+            elif "startLat" in message:
                 routeCoords["startLat"] = message["startLat"]
                 routeCoords["startLon"] = message["startLon"]
                 routeCoords["endLat"] = message["endLat"]
@@ -91,108 +118,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 #Send a confirmation back to the client
                 #await websocket.send_json({"status": "turnAngle received", "turnAngle": turnAngle})
+            else:
+                print("Unknown parsed message: ", message)
 
-            # Echo the message back to all connected WebSocket clients
+            # Echo the message back to all connected WebSocket clients - Must be a JSON string
             for client in connected_clients:
-                await client.send_text(data)
+                await client.send_text(firstMessage)
     except Exception as e:
         print(f"WebSocket connection closed: {e}")
     finally:
         connected_clients.remove(websocket)
-
-#TCP server connection for ESP32 to FastAPI
-async def receiveFromESP(reader, writer):
-    global currentData, TCPwriter
-    TCPwriter = writer
-    print("ESP32 client connected")
-    buffer = ""  # Buffer to accumulate message fragments
-    
-    while True:
-        data = await reader.read(100)  # Read up to 100 bytes
-        if not data:
-            break  # Exit loop if no data received
-
-        buffer += data.decode()  # Accumulate data in buffer
-
-        try:
-            # Attempt to decode JSON once buffer seems complete
-            message = json.loads(buffer)
-            print(f"Received complete message from ESP32: {message}")
-            buffer = ""  # Clear buffer if decoding is successful
-            
-            # Check if the message is of type "Coords"
-            if message.get("type") == "Coords":
-                currentData = {
-                    "type": "currentCoords",
-                    "currentLat": message["latitude"],
-                    "currentLon": message["longitude"],
-                    "azimuth": message["azimuth"],
-                    "direction": message["direction"]
-                }
-                print(f"Updated currentData: {currentData}")
-
-                # Send a response to ESP32 for checking
-                response = "Coords received"
-                writer.write(response.encode())
-                await writer.drain()
-
-                # Broadcast the updated `currentData` to Javascript
-                for client in connected_clients:
-                    await client.send_text(json.dumps({"update": currentData}))
-
-                    print(f"Received data: {currentData}")
-
-            # Check if the message is of type "currentStep"
-            elif message.get("type") == "action":
-                currentStep = {
-                    "type": "action",
-                    "action": message["action"]
-                }
-                print(f"Updated step data: {action}")
-
-                # Send a response to ESP32 for checking
-                response = "action received"
-                writer.write(response.encode())
-                await writer.drain()
-
-                # Broadcast the updated `currentData` to Javascript
-                for client in connected_clients:
-                    await client.send_text(json.dumps({"update": currentStep}))
-
-                    print(f"Received data: {currentData}")
-
-            elif message.get("type") == "testStep":
-                testStep = {
-                    "type": "testStep",
-                    "currentStep": message["testStep"]
-                }
-                print(f"Updated step data: {testStep}")
-
-                # Send a response to ESP32 for checking
-                response = "testStep received"
-                writer.write(response.encode())
-                await writer.drain()
-
-                # Broadcast the updated `currentData` to Javascript
-                for client in connected_clients:
-                    await client.send_text(json.dumps({"update": testStep}))
-
-                    print(f"Received data: {testStep}")
-
-        except json.JSONDecodeError:
-            print("Error decoding JSON from esp32")
-
-    print("Closing ESP32 connection")
-    writer.close()
-    await writer.wait_closed()
-
-async def startTCPServer():
-    server = await asyncio.start_server(receiveFromESP, "0.0.0.0", 8765)    #Same as ESP32
-    async with server:
-        await server.serve_forever()
-
-def runTCPServer():
-    asyncio.run(startTCPServer())
 
 #HTTP for FastAPI to ESP32
 #Link to HTML file
@@ -225,9 +160,5 @@ async def getNavDataESP32():
     return data
 
 if __name__ == "__main__":
-    # Start the TCP server in a separate thread
-    tcp_thread = threading.Thread(target=runTCPServer, daemon=True)
-    tcp_thread.start()
-
     # Start the FastAPI server with Uvicorn
-    uvicorn.run(app, host="192.168.230.96", port=5501) #Same as JS
+    uvicorn.run(app, host="127.0.0.1", port=5501) #Same as JS
