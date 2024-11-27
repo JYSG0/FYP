@@ -11,7 +11,8 @@ SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214"
 SENSOR_CHAR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214"
 LED_UUID = '19b10002-e8f2-537e-4f6c-d104768a1214'
 
-WEBSOCKET_URL = "ws://127.0.0.1:5501/ws"
+WEBSOCKET_URL_FASTAPI = "ws://127.0.0.1:5501/ws"
+WEBSOCKET_URL_JETSON = "ws://127.0.0.1:8765/ws"
 
 async def list_services(client):
     print("Listing services and characteristics:")
@@ -23,27 +24,11 @@ async def list_services(client):
 async def read_sensor_data(client):
     try:
         sensor_data = await client.read_gatt_char(SENSOR_CHAR_UUID)
-        print(f"Sensor Data: {sensor_data.decode('utf-8')}")
+        data = sensor_data.decode('utf-8')
+        print(f"Sensor Data: {data}")
+        return data
     except Exception as e:
         print(f"Error reading sensor data: {e}")
-# Function to decode and process the received JSON data
-def _decode_data(data):
-    # Convert the large number to bytes (if it's a string in the original data)
-    num_bytes = data.to_bytes((data.bit_length() + 7) // 8, 'big')
-
-    try:
-        # Decode bytes to string (assuming UTF-8 encoding)
-        json_str = num_bytes.decode('utf-8')
-        print("Decoded JSON String:", json_str)
-
-        # Load JSON data
-        json_data = json.loads(json_str)
-        print("Decoded JSON Data:", json_data)
-        
-        return json_data
-    except Exception as e:
-        print(f"Error decoding the large number: {e}")
-        return None
 
 async def send_sensor_data(client, json_data):
     try:
@@ -76,12 +61,18 @@ async def main():
         print(f"Connected to {DEVICE_ADDRESS}")
         await list_services(client)
 
-        async with websockets.connect(WEBSOCKET_URL) as websocket:
+        async with websockets.connect(WEBSOCKET_URL_FASTAPI) as websocket:
             print("Connected to WebSocket")
             try:
                 while True:
                     sensor_data = await read_sensor_data(client)
                     if sensor_data:
+                        # if "msg" in sensor_data:
+                        #     websocket = websocketJetson
+                        # else:
+                        #     print("FastAPI")
+                        #     websocket = websocketFastAPI
+                        print(sensor_data)
                         await websocket.send(json.dumps(sensor_data))
                     try:
                         response = await asyncio.wait_for(websocket.recv(), timeout=0.5)
