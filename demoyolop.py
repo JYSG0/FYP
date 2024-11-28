@@ -1,107 +1,175 @@
+
+import argparse
+import os, sys
+import shutil
 import time
 from pathlib import Path
+import imageio
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
+
+print(sys.path)
 import cv2
 import torch
+import torch.backends.cudnn as cudnn
+from numpy import random
+import scipy.special
+import numpy as np
+import torchvision.transforms as transforms
+import PIL.Image as image
+import odrive
 
-# Import necessary utilities
-from utils import (
-    time_synchronized, select_device, increment_path,
-    scale_coords, xyxy2xywh, non_max_suppression,
-    split_for_trace_model, driving_area_mask,
-    lane_line_mask, plot_one_box, show_seg_result,
-    AverageMeter, LoadImages
+from lib.config import cfg
+from lib.config import update_config
+from lib.utils.utils import create_logger, select_device, time_synchronized
+from lib.models import get_net
+from lib.dataset import LoadImages, LoadStreams
+from lib.core.general import non_max_suppression, scale_coords
+from lib.utils import plot_one_box,show_seg_result
+from lib.core.function import AverageMeter
+from lib.core.postprocess import morphological_process, connect_lane
+from tqdm import tqdm
+
+normalize = transforms.Normalize(
+    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
 )
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    normalize,
+])
 
-def detect():
-    # Specify paths to model and video directly
-    weights = 'yolopv2.pt'  # Update this path
-    source = 'SingaporeRoad.mp4'  # Update this path
-    img_size = 640
-    conf_thres = 0.3
-    iou_thres = 0.45
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    save_img = True  # Save inference images
 
-    # Set up directories and device
-    save_dir = Path(increment_path(Path('runs/detect') / 'exp', exist_ok=True))  # Increment save directory
-    save_dir.mkdir(parents=True, exist_ok=True)
-    inf_time = AverageMeter()
-    waste_time = AverageMeter()
-    nms_time = AverageMeter()
+# Function to find and connect to ODrive
+def connect_to_odrive():
+    try:
+        odrv = odrive.find_any()
+        if odrv is None:
+            print("ODrive not found. Exiting program.")
+            sys.exit()
+        return odrv
+    except Exception as e:
+        print("Error connecting to ODrive:", e)
+        sys.exit()
 
-    # Load model
-    stride = 32
-    model = torch.jit.load(weights, map_location=device)  # Load TorchScript model
-    model.to(device).eval()
 
-    if device == 'cuda':
-        model.half()  # Use FP16 for faster inference
+# Function to stop the motor (emergency stop)
+def emergency_stop(odrv0):
+    try:
+        odrv0.axis0.controller.input_vel = 0
+        print("Emergency Stop Activated!")
+    except Exception as e:
+        print("Error during emergency stop:", e)
 
-    # Set up the video source
-    dataset = LoadImages(source, img_size=img_size, stride=stride)
-    vid_path, vid_writer = None, None
 
-    # Run inference
-    t0 = time.time()
-    for path, img, im0s, vid_cap in dataset:
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if device == 'cuda' else img.float()
-        img /= 255.0  # Normalize to 0 - 1
+# Function to process drivable area and lane lines
+def process_segmentation(da_seg_mask, ll_seg_mask):
+    h, w = da_seg_mask.shape
+    vehicle_center = w // 2
 
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
+    # Check if there is a drivable area in front of the vehicle
+    front_row = da_seg_mask[int(h * 0.8):, :]  # Bottom 20% of the image
+    if np.sum(front_row) > 0:  # If green area exists
+        drivable = True
+    else:
+        drivable = False
+
+    # Check lane alignment
+    bottom_row = ll_seg_mask[-1, :]  # Bottom row of the lane mask
+    lane_pixels = np.where(bottom_row > 0)[0]
+    if len(lane_pixels) >= 2:
+        left_lane = lane_pixels[0]
+        right_lane = lane_pixels[-1]
+        lane_center = (left_lane + right_lane) // 2
+
+        if vehicle_center < left_lane:
+            lane_position = "left"
+        elif vehicle_center > right_lane:
+            lane_position = "right"
+        else:
+            lane_position = "center"
+    else:
+        lane_position = "unknown"
+
+    return drivable, lane_position
+
+
+# Main inference and control loop
+def detect(cfg, opt):
+    logger, _, _ = create_logger(cfg, cfg.LOG_DIR, 'demo')
+    device = select_device(logger, opt.device)
+
+    if os.path.exists(opt.save_dir):  # Output directory
+        shutil.rmtree(opt.save_dir)  # Delete existing directory
+    os.makedirs(opt.save_dir)  # Create new directory
+
+    model = get_net(cfg)
+    checkpoint = torch.load(opt.weights, map_location=device)
+    model.load_state_dict(checkpoint['state_dict'])
+    model = model.to(device).eval()
+
+    dataset = LoadImages(opt.source, img_size=opt.img_size)
+    odrv0 = connect_to_odrive()  # Connect to ODrive
+    odrv0.axis0.requested_state = 8  # Set ODrive to closed-loop velocity control mode
+
+    for path, img, img_det, vid_cap, shapes in tqdm(dataset, total=len(dataset)):
+        img = transform(img).to(device)
+        img = img.unsqueeze(0)
 
         # Inference
         t1 = time_synchronized()
-        [pred, anchor_grid], seg, ll = model(img)
+        _, da_seg_out, ll_seg_out = model(img)
         t2 = time_synchronized()
 
-        # Process outputs
-        pred = split_for_trace_model(pred, anchor_grid)
-        pred = non_max_suppression(pred, conf_thres, iou_thres)
+        # Post-process segmentation results
+        _, _, height, width = img.shape
+        da_seg_mask = torch.nn.functional.interpolate(da_seg_out, scale_factor=1, mode='bilinear')
+        _, da_seg_mask = torch.max(da_seg_mask, 1)
+        da_seg_mask = da_seg_mask.squeeze().cpu().numpy()
 
-        da_seg_mask = driving_area_mask(seg)
-        ll_seg_mask = lane_line_mask(ll)
+        ll_seg_mask = torch.nn.functional.interpolate(ll_seg_out, scale_factor=1, mode='bilinear')
+        _, ll_seg_mask = torch.max(ll_seg_mask, 1)
+        ll_seg_mask = ll_seg_mask.squeeze().cpu().numpy()
 
-        # Loop through detections
-        for i, det in enumerate(pred):
-            im0 = im0s.copy()
+        # Analyze drivable area and lane position
+        drivable, lane_position = process_segmentation(da_seg_mask, ll_seg_mask)
 
-            if len(det):
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
-                for *xyxy, conf, cls in reversed(det):
-                    plot_one_box(xyxy, im0, line_thickness=3)
+        if drivable:
+            print("Drivable area detected.")
+            odrv0.axis0.controller.input_vel = 1.0  # Set forward velocity
+        else:
+            print("No drivable area detected. Stopping.")
+            odrv0.axis0.controller.input_vel = 0  # Stop
 
-            # Overlay segmentation masks
-            show_seg_result(im0, (da_seg_mask, ll_seg_mask), is_demo=True)
+        if lane_position == "left":
+            print("Vehicle is drifting left. Adjusting.")
+            odrv0.axis0.controller.input_vel = 0.8  # Slow down slightly
+        elif lane_position == "right":
+            print("Vehicle is drifting right. Adjusting.")
+            odrv0.axis0.controller.input_vel = 0.8  # Slow down slightly
+        elif lane_position == "center":
+            print("Vehicle is well-centered in the lane.")
 
-            # Save results
-            if save_img:
-                save_path = str(save_dir / Path(path).name)
-                if dataset.mode == 'image':
-                    cv2.imwrite(save_path, im0)
-                else:  # Video mode
-                    if vid_path != save_path:
-                        vid_path = save_path
-                        if isinstance(vid_writer, cv2.VideoWriter):
-                            vid_writer.release()
-                        if vid_cap:  # video
-                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        else:  # stream
-                            fps, w, h = 30, im0.shape[1], im0.shape[0]
-                            save_path += '.mp4'
-                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                    vid_writer.write(im0)
+        # Show or save result
+        img_det = show_seg_result(img_det, (da_seg_mask, ll_seg_mask), _, _, is_demo=True)
+        cv2.imshow("YOLOP Inference", img_det)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            odrv0.axis0.requested_state = 1
 
-    inf_time.update(t2 - t1, img.size(0))
-    nms_time.update(t4 - t3, img.size(0))
-    waste_time.update(tw2 - tw1, img.size(0))
-    print(f'Done. ({time.time() - t0:.3f}s)')
+            break
 
-    if vid_writer:
-        vid_writer.release()
+    emergency_stop(odrv0)
+    print("Inference completed.")
+
 
 if __name__ == '__main__':
-    detect()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--weights', type=str, default='weights/End-to-end.pth', help='model.pth path(s)')
+    parser.add_argument('--source', type=str, default='inference/videos', help='file/folder')  # File/folder input
+    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
+    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--save-dir', type=str, default='inference/output', help='directory to save results')
+    opt = parser.parse_args()
+
+    with torch.no_grad():
+        detect(cfg, opt)
