@@ -127,15 +127,6 @@ def emergency_stop(odrv):
     except Exception as e:
         print(f"Error during emergency stop: {e}")
 
-# Function to trigger PS4 controller vibration
-def trigger_vibration():
-    if joysticks:
-        try:
-            joystick.rumble(0, 0.7, 500)  # Vibration intensity (left, right, duration in ms)
-            print("PS4 controller vibrating for lane departure warning.")
-        except Exception as e:
-            print(f"Error triggering vibration: {e}")
-
 # Analyze segmentation results for drivable area and lane position
 def process_segmentation(da_seg_mask, ll_seg_mask, img_det):
     h, w = da_seg_mask.shape
