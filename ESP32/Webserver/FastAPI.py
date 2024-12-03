@@ -5,8 +5,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import List, Dict
 import uvicorn
-import asyncio
-import threading
 import json
 import os
 
@@ -16,9 +14,11 @@ app.mount("/static", StaticFiles(directory=static_path), name="static")
 templates_directory = os.path.join(os.path.dirname(__file__), "template")
 templates = Jinja2Templates(directory=templates_directory)
 
-TCPwriter = None
  #Global variable to store latest data sent to socket
-currentStep = {}
+frontend = {
+    "currentStep": None,
+    "distanceToTurn": None,
+}
 action = {}
 routeActive = {}
 testStep = {}
@@ -57,6 +57,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Wait for messages from the WebSocket client
             data = await websocket.receive_text()
             print(f"Received message from WebSocket: {data}")
+            print(f"Type of data: {type(data)}")
             
             #Decode outer JSON string
             firstMessage = json.loads(data)
@@ -78,7 +79,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 currentCoords["currentLon"] = message["longitude"]
                 currentCoords["azimuth"] = message["azimuth"]
                 currentCoords["direction"] = message["direction"]
-                print(f"Updated current coordinates: {currentCoords['currentLat']}, {currentCoords['currentLon']}, {currentCoords['azimuth']}, {currentCoords['direction']}")
+                print(f"Updated current azimuth: {currentCoords['currentLat']}, {currentCoords['currentLon']}, {currentCoords['azimuth']}, {currentCoords['currentLon']}")
+
+            elif "vehicleControl" in message:
+                frontend["currentStep"] = message["currentStep"]
+                frontend["distanceToTurn"] = message["distanceToTurn"]
+                
 
             elif "startLat" in message:
                 routeCoords["startLat"] = message["startLat"]
@@ -122,42 +128,21 @@ async def websocket_endpoint(websocket: WebSocket):
                 print("Unknown parsed message: ", message)
 
             # Echo the message back to all connected WebSocket clients - Must be a JSON string
-            for client in connected_clients:
-                await client.send_text(firstMessage)
+
+            if "latitude" in message or "currentStep" in message:
+                for client in connected_clients:
+                    print(message)
+
+                    await client.send_text(firstMessage)
+                    print("sent first message")
+            else:
+                print(data)
+                for client in connected_clients:
+                    await client.send_text(data)
     except Exception as e:
         print(f"WebSocket connection closed: {e}")
     finally:
         connected_clients.remove(websocket)
-
-#HTTP for FastAPI to ESP32
-#Link to HTML file
-@app.get("/", response_class=HTMLResponse)
-async def map(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-#Endpoint for ESP32 to get start and end coordinates from routeCoords
-@app.get("/get-routeData")
-async def getRouteDataESP32():
-    return JSONResponse(content=routeCoords)    #FastAPI sends it in JSON formate
-
-@app.get("/get-routeActive")
-async def getRouteActiveESp32():
-    data = {
-        "routeActive": routeActive
-    }
-    print(data)
-    return JSONResponse(content=data)
-
-#Endpoint for ESP32 to get waypoints and instructions and turnAngle
-@app.get("/get-navData", response_model=Dict[str, List])
-async def getNavDataESP32():
-    data = {
-        "waypoints": waypoints,
-        "instructions": instructions,
-        "turnAngle": turnAngle
-    }
-    print(data)
-    return data
 
 if __name__ == "__main__":
     # Start the FastAPI server with Uvicorn
