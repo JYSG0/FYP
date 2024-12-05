@@ -79,7 +79,7 @@ body {
 /* Button styling */
 #toggleSearchBoxes {
     background-color: white;
-    border: 2px solid #1C274C;
+    border: 0.5px solid #1C274C;
     width: 40px;
     height: 40px;
     display: flex;
@@ -87,7 +87,7 @@ body {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    --svg-colour: #1C274C
+    --svg-colour: #1C274C;
     transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
 
@@ -140,10 +140,11 @@ button {
     cursor: pointer; /* Pointer cursor on hover */
     font-size: 16px; /* Font size */
     transition: background-color 0.3s; /* Smooth transition for hover */
-    border: 2px solid#1C274C; /* No border */
+    border: 0.5px solid#1C274C; /* No border */
     background-color: white; /* Blue background */
     color: #1C274C; /* Blue text */
     --start-icon-colour:#1C274C;
+    width: 86px;
 }
 
 #start-route:hover{
@@ -163,8 +164,8 @@ button {
     margin-left: 10px;
     font-size: 16px; /* Font size */
     transition: background-color 0.3s; /* Smooth transition for hover */
-    border: 2px solid#1C274C; /* No border */
-    width: auto;
+    border: 0.5px solid#1C274C; /* No border */
+    width: 86px;
     height: auto;
     --clear-icon-colour:#1C274C;
 }
@@ -196,7 +197,7 @@ button {
     z-index: 1000;
     top: 10px;
     right: 10px;
-    position: fixed;
+    position: absolute;
 }
 
 #instructions {
@@ -244,21 +245,26 @@ button {
     border-radius: 5px;
     text-align: center;
     transition: background-color 0.3s, color 0.3s;
+    --toggle-icon-colour: white;
 }
 
 #toggle-instr:hover {
     background-color: #188d18;
+    --toggle-icon-colour: #ccc;
 }
 
 #toggle-instr.active {
     background-color: white;
     color: #23a523;
     height: 44.33px;
+    border: 2px solid #23a523;
+    --toggle-icon-colour: #23a523;
 }
 
 #toggle-instr.active:hover {
     background-color: #ccc; /* Light grey on hover for active button */
     color: #23a523;
+    --toggle-icon-colour: #23a523;
 }
 
 /* Instruction tabs */
@@ -299,4 +305,110 @@ button {
     border: 0px solid #ccc;
     padding: 10px;
     overflow-y: auto;
+}
+
+#recentre-button {
+    position: absolute;
+    top: 15px;
+    right: 60px;
+    z-index: 999; /* Ensure it's above other controls */
+    background-color: white;
+    border: 1px solid #ccc;
+    padding: 0px;
+    border-radius: 50%; /* Circle button */
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    width: 30px;
+    box-shadow: 0 0 10px rgba(211, 211, 211, 0.7); /* Light grey outline */
+}
+
+/* Optional hover effect */
+#recentre-button:hover {
+    background-color: #f0f0f0;
+}
+
+.compass-container {
+    width: 50px; /* Width of the box */
+    height: 50px; /* Height of the box */
+    background-color: white; /* White background */
+    display: flex; /* Flexbox for centering contents */
+    justify-content: center; /* Center horizontally */
+    align-items: center; /* Center vertically */
+    border: 2px solid #ccc; /* Border around the box */
+    position: absolute; /* Absolute position to stay at bottom */
+    bottom: 10px; /* Space from the bottom */
+    left: 50%; /* Center horizontally on the page */
+    transform: translateX(-50%); /* Adjust for centering */
+    z-index: 10; /* Ensure it appears above the map */
+    border-radius: 5px; /* Rounded corners */
+}
+
+#triangle {
+    width: 0;
+    height: 0;
+    border-left: 10px solid transparent;
+    border-right: 10px solid transparent;
+    border-bottom: 20px solid rgba(174, 48, 240, 1); /* Outer triangle color (purple) */
+    position: absolute;
+    top: 70%;
+    left: 50%;
+    transform: translate(-50%, -100%) rotate(0deg); /* Initial position and rotation */
+    transition: transform 0.5s ease-in-out; /* Smooth transition for position and rotation */
+}
+
+.inner-triangle {
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 10px solid white; /* Inner triangle color (white) */
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, 100%) rotate(0deg);
+    transition: transform 0.5s ease-in-out; /* Smooth transition for the inner triangle as well */
+}
+
+#cardinal-directions {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    transform-origin: center; /* Set transform origin to center */
+}
+
+.direction {
+    position: absolute;
+    font-size: 14px;
+    font-weight: bold;
+    color: black;
+}
+
+/* Position the directions */
+.north {
+    top: -3px; /* Position above the triangle */
+    left: 50%;
+    transform: translateX(-50%); /* Center */
+}
+
+.south {
+    bottom: -2px; /* Position below the triangle */
+    left: 50%;
+    transform: translateX(-50%); /* Center */
+}
+
+.east {
+    right: 0px; /* Position to the right of the triangle */
+    top: 68%;
+    transform: translateY(-105%); /* Center vertically */
+}
+
+.west {
+    left: 0px; /* Position to the left of the triangle */
+    top: 68%;
+    transform: translateY(-105%); /* Center vertically */
 }
