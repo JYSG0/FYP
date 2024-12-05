@@ -8,8 +8,8 @@ import websockets
 DEVICE_ADDRESS = "88:13:BF:6F:E0:B6"
 
 SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214"
-SENSOR_CHAR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214"
-LED_UUID = '19b10002-e8f2-537e-4f6c-d104768a1214'
+SENSOR_CHAR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214"    #Same UUID as _BLE_SEND_UUID in ESP32. ESP32 uses this to send so bleak uses this to receive
+LED_UUID = '19b10002-e8f2-537e-4f6c-d104768a1214'    #Same UUID as _BLE_RECEIVE_UUID in ESP32. ESP32 uses this to receive and modify variables so bleak uses this to send
 
 
 WEBSOCKET_URL_FASTAPI = "ws://127.0.0.1:5501/ws"
