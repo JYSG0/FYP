@@ -15,13 +15,6 @@ LED_UUID = '19b10002-e8f2-537e-4f6c-d104768a1214'
 WEBSOCKET_URL_FASTAPI = "ws://127.0.0.1:5501/ws"
 WEBSOCKET_URL_JETSON = "ws://127.0.0.1:8765/ws"
 
-frontend = {
-    "currentStep": None,
-    "distanceToTurn": None,
-}
-
-msg = {}
-
 async def list_services(client):
     print("Listing services and characteristics:")
     for service in client.services:
@@ -44,11 +37,6 @@ async def read_data(client, websocketFastAPI, websocketJetson):
     try:
         while True:
             sensor_data = await read_sensor_data(client)
-            # if "msg" in sensor_data:
-            #     websocket = websocketJetson
-            # else:
-            #     print("FastAPI")
-            #     websocket = websocketFastAPI
             print(sensor_data)
             if "msg" in sensor_data:
                 await websocketFastAPI.send(json.dumps(sensor_data))
