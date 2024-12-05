@@ -1,6 +1,6 @@
 <!-- To start servers:
 MapTile: 
-    maptile-server
+    maptiler-server
 
 Nominatim: 
     virtual environment (source torch_env/bin/activate)
@@ -8,13 +8,15 @@ Nominatim:
     ./nominatim-cli.py serve
 
 OSRM:
-    Go inside (/srv/osrm/build/) 
-    ./osrm-routed -p 5000 --algorithm=MLD ../osrm-backend/sg1.osrm
+    Go inside (/srv/osrm/osrm-backend/car_profile) 
+    osrm-routed --algorithm mld sg1.osrm
 
     and the query is ( curl "http://localhost:5000/route/v1/driving/103.851959,1.290270;103.819839,1.352083?overview=full&geometries=geojson&steps=true")
 
 To run html:
-python3 -m http.server 8000 -->
+/ssd1/QGIS_Map/ESP32Offline
+python3 -m http.server 8000 
+-->
 
 
 <!DOCTYPE html>
@@ -22,13 +24,38 @@ python3 -m http.server 8000 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>J.A.M.A.R</title>
-    <link href="Leaflet/maplibre.css" rel="stylesheet" />
-    <script src="Leaflet/maplibre.js"></script>
-    <link href="styles.css" rel="stylesheet" /> 
+    <title>MapTiler Map</title>
+    <link href="../Leaflet/maplibre.css" rel="stylesheet" />
+    <script src="../Leaflet/maplibre.js"></script>
+    <link href="../static/styles.css" rel="stylesheet" /> 
 </head>
 <body>
     <div id="map"></div>
+
+    <!--Recentre to location button-->
+    <button id="recentre-button">
+        <span class="icon">
+            <svg fill="#000000" height="24px" width="24px" style="display: block; margin: auto;" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 296.991 296.991" xml:space="preserve" stroke="#000000" stroke-width="0.00296991">
+                <g id="SVGRepo_bgCarrier" stroke-width="0"/>
+                <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"/>
+                <g id="SVGRepo_iconCarrier"> <path d="M281.991,133.496h-13.445c-6.8-54.74-50.31-98.25-105.05-105.05V15c0-8.284-6.716-15-15-15c-8.284,0-15,6.716-15,15v13.446 c-54.74,6.8-98.25,50.31-105.05,105.05H15.001c-8.284,0-15,6.716-15,15c0,8.284,6.716,15,15,15h13.445 c6.8,54.74,50.31,98.25,105.05,105.05v13.445c0,8.284,6.716,15,15,15c8.284,0,15-6.716,15-15v-13.445 c54.74-6.8,98.25-50.31,105.05-105.05h13.445c8.284,0,15-6.716,15-15C296.991,140.212,290.275,133.496,281.991,133.496z M163.496,238.232V191c0-8.284-6.716-15-15-15c-8.284,0-15,6.716-15,15v47.232c-38.172-6.36-68.376-36.564-74.736-74.736h47.231 c8.284,0,15-6.716,15-15c0-8.284-6.716-15-15-15H58.76c6.36-38.172,36.564-68.376,74.736-74.736v47.231c0,8.284,6.716,15,15,15 c8.284,0,15-6.716,15-15V58.76c38.172,6.36,68.376,36.564,74.736,74.736h-47.231c-8.284,0-15,6.716-15,15c0,8.284,6.716,15,15,15 h47.231C231.872,201.668,201.667,231.872,163.496,238.232z"/> </g>
+            </svg>
+        </span>
+    </button>
+
+    <!-- Compass arrow -->
+    <div class="compass-container">
+        <div id="triangle">
+            <!-- Inner triangle -->
+            <div class="inner-triangle"></div>
+        </div>
+        <div id="cardinal-directions">
+            <div class="direction north">N</div>
+            <div class="direction south">S</div>
+            <div class="direction east">E</div>
+            <div class="direction west">W</div>
+        </div>
+    </div>
     
     <div class="search-area">
         <!-- Search box section -->
@@ -76,12 +103,22 @@ python3 -m http.server 8000 -->
         </button>
         <button id="start-route">
             <span class="icon">
-                <svg fill="var(--start-icon-colour)" width="24px" height="24px" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
-                    <g id="SVGRepo_bgCarrier" stroke-width="0"/>
-                    <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"/>
-                    <g id="SVGRepo_iconCarrier">
-                    <path d="M 46.6445 44.2891 C 46.6445 43.3516 46.2227 42.6016 45.7305 41.6172 L 31.1289 11.5235 C 30.1445 9.5078 29.2305 8.8750 28.0117 8.8750 C 26.7695 8.8750 25.8554 9.5078 24.8711 11.5235 L 10.2695 41.6172 C 9.7773 42.6250 9.3555 43.3750 9.3555 44.3125 C 9.3555 46.0469 10.6914 47.1250 12.7305 47.1250 L 43.2695 47.1016 C 45.3320 47.1016 46.6445 46.0234 46.6445 44.2891 Z M 42.1680 43.1172 C 42.1680 43.2578 42.0742 43.3516 41.9102 43.3516 L 14.0898 43.3516 C 13.9258 43.3516 13.8320 43.2578 13.8320 43.1172 C 13.8320 43.0234 13.8789 42.9297 13.9258 42.8359 L 27.7305 14.1250 C 27.8008 14.0078 27.8711 13.9140 28.0117 13.9140 C 28.1289 13.9140 28.1992 14.0078 28.2695 14.1250 L 42.0742 42.8359 C 42.1211 42.9297 42.1680 43.0234 42.1680 43.1172 Z"/>
-                    </g>
+                <svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+                    width="24px" viewBox="0 0 624 592" enable-background="new 0 0 624 592" xml:space="preserve">
+                <path fill="var(--start-icon-colour)" opacity="1.000000" stroke="none" 
+                    d="
+                M432.812439,296.250671 
+                    C470.640717,363.835571 508.282623,431.102386 545.956909,498.427155 
+                    C543.561340,499.904968 542.426636,498.139465 541.158325,497.413300 
+                    C491.575500,469.025543 442.016693,440.595764 392.460083,412.162140 
+                    C373.243591,401.136444 353.966949,390.211945 334.889496,378.950317 
+                    C330.884644,376.586212 327.919464,376.796234 324.046387,379.040253 
+                    C281.242676,403.839996 238.356247,428.497101 195.478607,453.169159 
+                    C169.346802,468.205566 143.193542,483.204712 117.037918,498.199677 
+                    C116.094284,498.740662 115.216324,499.793488 112.980385,498.544434 
+                    C184.948334,370.174347 255.735199,241.156631 329.600189,112.267632 
+                    C364.403534,174.311813 398.514771,235.122223 432.812439,296.250671 
+                z"/>
                 </svg>
             </span>
             <span>Start</span>
@@ -99,10 +136,10 @@ python3 -m http.server 8000 -->
     <div id="instructions" style="display: none;">
         <div class="tabs">
             <button class="tab-button tab-button-active" onclick="showTab('fullRoute')">Full Route</button>
-            <button class="tab-button tab-button-inactive" onclick="showTab('midRoute')">Mid Route</button>
+            <button class="tab-button tab-button-inactive" onclick="showTab('midRoute')">User Route</button>
             <button id="toggle-instr">
                 <span>
-                    <svg fill="white" width="24px" height="24" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg" stroke="#000000" stroke-width="0.00032">
+                    <svg fill="var(--toggle-icon-colour)" width="24px" height="24" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg" stroke="var(--toggle-icon-colour)" stroke-width="0.00032">
                         <g id="SVGRepo_bgCarrier" stroke-width="0"/>
                         <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"/>
                         <g id="SVGRepo_iconCarrier">
@@ -133,6 +170,6 @@ python3 -m http.server 8000 -->
         <div id="hidden-current-instruction" style="display: none;"></div>
     </div>
 
-    <script src="OfflineMap.js"></script>
+    <script src="../static/OfflineMap.js"></script>
 </body>
 </html>
