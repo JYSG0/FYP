@@ -31,9 +31,8 @@ chan2=AnalogIn(ads, ADS.P3)
 print(chan1.value, chan1.voltage)
 print(chan2.value, chan2.voltage)
 
-
-# Function to map chan1 value to a specific range (e.g., 10 to 100)
-def map_potentiometer_value(value, input_min=0, input_max=26230, output_min=0, output_max=1023):
+#  Function to map chan1 value to a specific range (e.g., 10 to 100)
+def map_value(value, input_min, input_max, output_min, output_max):
     return ((value - input_min) * (output_max - output_min)) / (input_max - input_min) + output_min
 
 # Global variable to track drivable area detection and object detection
@@ -149,37 +148,6 @@ def detection(cap, run_detection=True):
         # Display the annotated frame
         cv2.imshow('YOLOv8 Detection', annotated_frame)
 
-# Calibration for odrive wheels
-def calibration(odrv, duration=20):
-    """
-    Move axis0 and axis1 of the given ODrive instance in a defined pattern
-    for a specified duration.
-    
-    Parameters:
-        odrv: ODrive instance
-        duration: Total duration of the movement in seconds
-    """
-    # Define the key states
-    states = [(2, -2), (0, 0), (-2, 2)]
-    state_duration = duration / len(states)  # Duration for each state
-
-    start_time = time.time()
-    
-    while time.time() - start_time < duration:
-        elapsed_time = time.time() - start_time
-
-        # Determine the current state based on elapsed time
-        current_state_index = int(elapsed_time // state_duration) % len(states)
-        input_vel = states[current_state_index]
-
-        # Set input velocities for the axes
-        odrv.axis0.controller.input_vel = input_vel[1]  # Axis 0
-        odrv.axis1.controller.input_vel = input_vel[0]  # Axis 1
-        time.sleep(2)  # Small delay to prevent busy waiting
-
-    # Set both axes to zero velocity at the end
-    odrv.axis0.controller.input_vel = 0
-    odrv.axis1.controller.input_vel = 0
 
 # Connect to ODrive
 def connect_to_odrive():
@@ -195,23 +163,9 @@ def connect_to_odrive():
         print("Error connecting to ODrive:", e)
         exit()
 
-# def connect_to_esp():
-#     global conn  # Declare as global to access the flag
 
-#     host = '192.168.230.167'  # Accept connections from any IP address
-#     port = 8888  # Port to listen on
-
-#     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#     server_socket.bind((host, port))
-#     server_socket.listen(1)  # Accept only one connection for simplicity
-
-#     print("Waiting for connection from ESP32...")
-#     conn, address = server_socket.accept()  # Accept new connection
-#     print("Connection from:", address)
-
-# Connect to ODrive and ESP
+# Connect to ODrive 
 odrv0 = connect_to_odrive()
-# connect_to_esp()
 
 # Display drive voltage
 print("ODrive Voltage:", odrv0.vbus_voltage)
@@ -226,7 +180,8 @@ def Manual_drive(keys):
 
           # Read potentiometer value
         try:
-            pot_value = map_potentiometer_value(chan1.value)
+            pot_value = map_value (chan1.value, 0, 26230, 0, 1023)
+            steering_angle = map_value(pot_value, 0 , 1023, -40 ,40)
         except OSError as e:
             print(f"Error reading potentiometer: {e}")
     
@@ -238,13 +193,13 @@ def Manual_drive(keys):
 
         # 'w' key to move forward
         if keys[pygame.K_w]:
-            odrv0.axis1.controller.input_vel = 2
-            odrv0.axis0.controller.input_vel = 2   
+            odrv0.axis1.controller.input_vel = -1
+            odrv0.axis0.controller.input_vel = -1  
             print ('FORWARD')
         # 's' key to move backwards
         if keys[pygame.K_s]:
-            odrv0.axis1.controller.input_vel = -2
-            odrv0.axis0.controller.input_vel = -2      
+            odrv0.axis1.controller.input_vel = 1
+            odrv0.axis0.controller.input_vel = 1      
             print ('BACKWARD')
 
         # 'shift' key to brake
@@ -254,72 +209,42 @@ def Manual_drive(keys):
             odrv0.axis0.controller.input_vel = 0
             print ('STOP')
 
-                #'a' is pressed
-        if keys[pygame.K_a] and pot_value <= 800:  # Steer Left
+             # 'a' is pressed
+        if keys[pygame.K_a] and steering_angle <= 25:  # Steer Left
             pwm.value = False
             steering.value = True
             if pot_value is not None:
-                print(f"Steering Left: Potentiometer Value: {pot_value}")
-            Steering = True
+                print(f"Steering Left: Potentiometer Value: {int(steering_angle)}")
+                
 
         #'d' is pressed
-        if keys[pygame.K_d] and pot_value >= 300:  # Steer Right
+        if keys[pygame.K_d] and steering_angle >= -25:  # Steer Right
             pwm.value = False
             steering.value = False
             if pot_value is not None:
-                print(f"Steering Right: Potentiometer Value: {pot_value}")
-            Steering = True
+                print(f"Steering Right: Potentiometer Value: {int(steering_angle)}")
 
         if not keys[pygame.K_a] and not keys[pygame.K_d]: # Joystick IDLE
             pwm.value = True
             steering.value = True
             if pot_value is not None:
-                print(f"No Steering: Potentiometer Value: {pot_value}")
+                print(f"No Steering: Potentiometer Value: {int(steering_angle)}")
+                
+        if steering_angle >= 25 and keys[pygame.K_a]:  #Steer Right Limit
+            pwm.value = True
+            steering.value = True
+            if pot_value is not None:
+                print(f"No Steering: Potentiometer Value: {int(steering_angle)}")
 
-        return pot_value
-
-# def server_program():
-#     # Receive data
-#     data = conn.recv(1024).decode()
-#     if not data and esp:
-#         print("Received from ESP32:", data)
-
-#     if data == "test" and esp:
-#         print("Calibration 50/100")
-
-#     elif data == "test1" and esp:
-#         print("Calibration 100/100")
-
-#     elif data == "start" and esp:
-#         print("Starting motor")
-#         odrv0.axis0.requested_state = 8  # Activate ODrive axis 0
-#         odrv0.axis1.requested_state = 8  # Activate ODrive axis 1
-    
-    # elif data =="forward" and esp:
-    #     odrv0.axis1.controller.input_vel = -2
-    #     odrv0.axis0.controller.input_vel = -2
-    #     print ('FORWARD')
+        if steering_angle <= -25 and keys[pygame.K_d]: #Steer Left Limit
+            pwm.value = True
+            steering.value = True
+            if pot_value is not None:
+                print(f"No Steering: Potentiometer Value: {int(steering_angle)}")
 
 
-    # elif data =="backward" and esp:
-    #     odrv0.axis1.controller.input_vel = 2
-    #     odrv0.axis0.controller.input_vel = 2
-    #     print ('BACKWARD')
-        
+        return steering_angle
 
-#     elif data == "stop" and esp:
-#         print("Stopping motor...")
-#         odrv0.axis1.controller.input_vel = 0 #Stop WHeels before moving backwards
-#         odrv0.axis0.controller.input_vel = 0
-    
-#     else:
-#         e = bool
-#         Exception == e
-#         print("Error:", e)
-
-#     # Send response
-#     response = "Hello from Jetson"
-#     conn.send(response.encode())
         
 def main():
     # global exit variable
