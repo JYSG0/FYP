@@ -1,0 +1,344 @@
+import tkinter as tk
+from tkinter import ttk
+from threading import Thread
+import socket
+import odrive
+import torch
+import cv2
+import numpy as np
+from FINAL_UNET import UNet  # Import the UNet class from unet.py
+from ultralytics import YOLO
+from collections import Counter
+import pygame
+import time
+import os
+import pyrealsense2
+from realsense_depth import *
+from ultralytics.utils.plotting import Annotator, colors
+import Jetson.GPIO as GPIO
+import busio
+import board
+import digitalio
+import adafruit_ads1x15.ads1115 as ADS
+from adafruit_ads1x15.analog_in import AnalogIn
+
+# Initialize global variables
+exit_flag = False
+run_detection = True
+Steering = False
+start_mode = True
+class_ids = []
+recording = False
+out_annotated = None
+img_counter = 0
+vid_counter = 0
+pot_value = 0
+
+# Initialize GPIO Pins
+pwm = digitalio.DigitalInOut(board.D12)
+steering = digitalio.DigitalInOut(board.D13)
+pwm.direction = digitalio.Direction.OUTPUT
+steering.direction = digitalio.Direction.OUTPUT
+pwm.value = True  # Set GPIO12 high
+steering.value = True  # Set GPIO13 low
+
+# Initialize I2C and ADS1115
+i2c = busio.I2C(board.SCL_1, board.SDA_1)
+time.sleep(0.1)  # Small delay to stabilize the connection
+ads = ADS.ADS1115(i2c, address=0x48)
+chan1 = AnalogIn(ads, ADS.P0)
+chan2 = AnalogIn(ads, ADS.P3)
+
+# Initialize camera
+cap = DepthCamera()
+cap1 = cv2.VideoCapture(6)
+
+# Load the model
+model = YOLO("best.pt")
+names = model.names
+
+# Directory setup for recording images and videos
+output_image_dir = 'output_images'
+output_video_dir = 'output_videos'
+os.makedirs(output_image_dir, exist_ok=True)
+os.makedirs(output_video_dir, exist_ok=True)
+
+# Initialize pygame
+pygame.init()
+info = pygame.display.Info()
+screen_width = info.current_w
+screen_height = info.current_h
+os.environ['SDL_VIDEO_WINDOW_POS'] = "0,0"
+os.environ['SDL_VIDEO_CENTERED'] = "1"
+pygame.display.set_mode((screen_width, screen_height), pygame.FULLSCREEN | pygame.SRCALPHA)
+overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+pygame.event.set_grab(True)
+
+# Connect to ODrive
+def connect_to_odrive():
+    print("Finding odrive")
+    try:
+        odrv = odrive.find_any()
+        if odrv is None:
+            print("ODrive not found. Exiting program.")
+            exit()
+        print("ODrive connected successfully.")
+        return odrv
+    except Exception as e:
+        print("Error connecting to ODrive:", e)
+        exit()
+
+odrv0 = connect_to_odrive()
+print("ODrive Voltage:", odrv0.vbus_voltage)
+odrv0.axis0.controller.config.control_mode = 2  # Vel Mode
+odrv0.axis0.controller.config.input_mode = 2  # Vel Mode
+odrv0.axis0.requested_state = 8  # Start Motor
+odrv0.axis1.requested_state = 8  # Start Motor
+
+# Function to map chan1 value to a specific range (e.g., 10 to 100)
+def map_value(value, input_min, input_max, output_min, output_max):
+    return ((value - input_min) * (output_max - output_min)) / (input_max - input_min) + output_min
+
+# Function to get center of bounding box
+def get_center_of_bbox(box):
+    x_center = int((box[0] + box[2]) / 2)
+    y_center = int((box[1] + box[3]) / 2)
+    return (x_center, y_center)
+
+# Detection function
+def detection(cap, run_detection=True):
+    global class_ids, annotated_frame
+    if True:
+        ret, success, frame = cap.get_frame()
+        idx = 0
+        if not ret:
+            print("Failed to grab frame")
+            return
+        if run_detection:
+            results = model(frame, conf=0.5, verbose=False, device=0)
+            annotated_frame = results[0].plot()
+            boxes = results[0].boxes.xyxy.cpu().tolist()
+            clss = results[0].boxes.cls.cpu().tolist()
+            annotator = Annotator(annotated_frame, line_width=2, example=names)
+            annotated_frame = cv2.resize(annotated_frame, (screen_width, screen_height))
+            annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+            camera_surface = pygame.image.frombuffer(annotated_frame.tobytes(), (annotated_frame.shape[1], annotated_frame.shape[0]), "RGB")
+            screen = pygame.display.get_surface()
+            screen.blit(camera_surface, (0, 0))
+            overlay.fill((0, 0, 0, 0))
+            screen.blit(overlay, (0, 0))
+            pygame.display.update()
+            if boxes is not None:
+                for box, cls in zip(boxes, clss):
+                    idx += 1
+                    annotator.box_label(box, color=colors(int(cls), True), label=names[int(cls)])
+                    crop_obj = annotated_frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]
+                    center_point = get_center_of_bbox(box)
+                    cv2.circle(annotated_frame, center_point, 5, (0, 0, 255), -1)
+                    distance = success[center_point[1], center_point[0]]
+                    cv2.putText(annotated_frame, "{}mm".format(distance), (center_point[0], center_point[1] - 20), cv2.FONT_HERSHEY_PLAIN, 2, (0, 0, 0), 2)
+            for result in results:
+                class_ids = result.boxes.cls.tolist()
+                class_names = [model.names[int(id)] for id in class_ids]
+            class_counts = Counter(class_names)
+            for class_name, count in class_counts.items():
+                print(f"{count} {class_name} detected.")
+        else:
+            results = model(frame, conf=0.5, verbose=False, device=0)
+            annotated_frame = results[0].plot()
+
+# Camera function
+def camera(cap1):
+    global frame1
+    if cap1.isOpened():
+        ret, frame1 = cap1.read()
+        if not ret:
+            print("Failed to grab frame")
+            return
+
+# Manual drive function
+def Manual_drive(keys, class_ids):
+    global Steering, start_mode, pot_value
+    try:
+        pot_value = map_value(chan1.value, 0, 26230, 0, 1023)
+        steering_angle = map_value(pot_value, 0, 1023, -40, 40)
+    except OSError as e:
+        print(f"Error reading potentiometer: {e}")
+    if keys[pygame.K_e]:
+        start_mode = not start_mode
+        if start_mode:
+            print("Starting...")
+            odrv0.axis0.requested_state = 8
+            odrv0.axis1.requested_state = 8
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis0.controller.input_vel = 0
+        if start_mode is False:
+            print("Stopping...")
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis0.controller.input_vel = 0
+            odrv0.axis1.requested_state = 1
+            odrv0.axis0.requested_state = 1
+    if keys[pygame.K_w]:
+        odrv0.axis1.controller.input_vel = -1
+        odrv0.axis0.controller.input_vel = -1
+        print('FORWARD')
+    if odrv0.axis1.controller.input_vel >= -1:
+        if 4 in class_ids or 8 in class_ids:
+            print("Stop")
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis0.controller.input_vel = 0
+        elif 6 in class_ids or 7 in class_ids:
+            print("Slow")
+            odrv0.axis1.controller.input_vel = -0.8
+            odrv0.axis0.controller.input_vel = -0.8
+        if 1 in class_ids or 3 in class_ids:
+            print("Pedestrain")
+            odrv0.axis1.controller.input_vel = -0.8
+            odrv0.axis0.controller.input_vel = -0.8
+    if keys[pygame.K_s]:
+        odrv0.axis1.controller.input_vel = 1
+        odrv0.axis0.controller.input_vel = 1
+        print('BACKWARD')
+    mods = pygame.key.get_mods()
+    if mods & pygame.KMOD_SHIFT:
+        odrv0.axis1.controller.input_vel = 0
+        odrv0.axis0.controller.input_vel = 0
+        print('STOP')
+    if keys[pygame.K_a] and steering_angle <= 25:
+        pwm.value = False
+        steering.value = True
+        Steering = True
+        if pot_value is not None:
+            print(f"Steering Left: Potentiometer Value: {int(steering_angle)}")
+    if keys[pygame.K_d] and steering_angle >= -25:
+        pwm.value = False
+        steering.value = False
+        Steering = True
+        if pot_value is not None:
+            print(f"Steering Right: Potentiometer Value: {int(steering_angle)}")
+    if not keys[pygame.K_a] and not keys[pygame.K_d]:
+        pwm.value = True
+        steering.value = True
+        Steering = False
+        if pot_value is not None:
+            print(f"No Steering: Potentiometer Value: {int(steering_angle)}")
+    if steering_angle >= 25 and keys[pygame.K_a]:
+        pwm.value = True
+        steering.value = True
+        if pot_value is not None:
+            print(f"No Steering: Potentiometer Value: {int(steering_angle)}")
+    if steering_angle <= -25 and keys[pygame.K_d]:
+        pwm.value = True
+        steering.value = True
+        if pot_value is not None:
+            print(f"No Steering: Potentiometer Value: {int(steering_angle)}")
+    return pot_value
+
+# Main function
+def main():
+    global exit_flag, run_detection, recording, out_annotated, img_counter, vid_counter, pot_value
+    while not exit_flag:
+        pygame.event.pump()
+        keys = pygame.key.get_pressed()
+        object_detection_thread = Thread(target=detection, args=(cap,))
+        object_detection_thread.start()
+        camera(cap1)
+        Manual_drive(keys, class_ids)
+        pot_value = Manual_drive(keys, class_ids)
+        if pot_value is None:
+            continue
+        if recording:
+            out_annotated.write(annotated_frame)
+            out_combined.write(frame1)
+        if keys[pygame.K_m]:
+            run_detection = not run_detection
+            print(f"Object Detection is now: [{run_detection}]")
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis1.controller.input_vel = 0
+        elif keys[pygame.K_ESCAPE]:
+            print("Exiting...")
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis0.controller.input_vel = 0
+            odrv0.reboot()
+            exit_flag = True
+            break
+        if keys[pygame.K_r]:
+            if not recording:
+                print("Recording started for both annotated and combined frames...")
+                vid_name_annotated = os.path.join(output_video_dir, f"object_video_{vid_counter}.mp4")
+                vid_name_combined = os.path.join(output_video_dir, f"lane_video_{vid_counter}.mp4")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out_combined = cv2.VideoWriter(vid_name_combined, fourcc, 20.0, (frame1.shape[1], frame1.shape[0]))
+                out_annotated = cv2.VideoWriter(vid_name_annotated, fourcc, 20.0, (annotated_frame.shape[1], annotated_frame.shape[0]))
+                recording = True
+            else:
+                print("Recording stopped.")
+                recording = False
+                out_annotated.release()
+                out_combined.release()
+                print(f"{vid_name_annotated} and {vid_name_combined} saved!")
+                vid_counter += 1
+        elif keys[pygame.K_t]:
+            img_name_annotated = os.path.join(output_image_dir, f"object_frame_{img_counter}.png")
+            img_name_combined = os.path.join(output_image_dir, f"lane_frame_{img_counter}.png")
+            cv2.imwrite(img_name_annotated, annotated_frame)
+            cv2.imwrite(img_name_combined, frame1)
+            print(f"Images saved: {img_name_annotated} and {img_name_combined}")
+            img_counter += 1
+        elif keys[pygame.K_l]:
+            print("Status:")
+            print(f"Detection: [{run_detection}]")
+            print(f"Recording: [{recording}]")
+        cv2.waitKey(1)
+    pygame.quit()
+    cap.release()
+    cv2.destroyAllWindows()
+    print("Exiting all components.")
+
+# Tkinter GUI
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Robot Control")
+        self.root.geometry("400x300")
+        self.start_button = ttk.Button(root, text="Start", command=self.start)
+        self.start_button.pack(pady=10)
+        self.stop_button = ttk.Button(root, text="Stop", command=self.stop)
+        self.stop_button.pack(pady=10)
+        self.quit_button = ttk.Button(root, text="Quit", command=self.quit)
+        self.quit_button.pack(pady=10)
+        self.pot_value_label = ttk.Label(root, text="Potentiometer Value: 0")
+        self.pot_value_label.pack(pady=10)
+        self.terminal_output_label = ttk.Label(root, text="Terminal Output:")
+        self.terminal_output_label.pack(pady=10)
+        self.terminal_output_text = tk.Text(root, height=10, width=50)
+        self.terminal_output_text.pack(pady=10)
+        self.update_labels()
+
+    def start(self):
+        global exit_flag
+        exit_flag = False
+        self.thread = Thread(target=main)
+        self.thread.start()
+
+    def stop(self):
+        global exit_flag
+        exit_flag = True
+
+    def quit(self):
+        self.stop()
+        self.root.quit()
+
+    def update_labels(self):
+        global pot_value
+        self.pot_value_label.config(text=f"Potentiometer Value: {pot_value}")
+        self.root.after(1000, self.update_labels)
+
+    def append_terminal_output(self, text):
+        self.terminal_output_text.insert(tk.END, text + "\n")
+        self.terminal_output_text.see(tk.END)
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
