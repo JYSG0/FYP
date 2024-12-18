@@ -21,9 +21,12 @@ from adafruit_ads1x15.analog_in import AnalogIn
 import tkinter as tk
 import threading
 
-import asyncio
-from rplidar import RPLidar
-
+import numpy as np
+from source import FastestRplidar
+import time
+import serial
+import subprocess
+from threading import Timer
 # Adjust the serial port and baud rate to your specific setup
 PORT_NAME = '/dev/ttyUSB0'
 BAUD_RATE = 115200
@@ -56,12 +59,10 @@ def map_value(value, input_min, input_max, output_min, output_max):
     return ((value - input_min) * (output_max - output_min)) / (input_max - input_min) + output_min
 
 # Global variable to track drivable area detection and object detection
-run_detection = True
 Steering = False
 start_mode = True
 exit_flag = False
-red_zone = False
-green_zone = False
+lidar_detect = False
 #object detection class_id
 class_ids=[]
 
@@ -74,7 +75,9 @@ steering.direction = digitalio.Direction.OUTPUT
 #Initial Low 
 pwm.value = True  # Set GPIO12 high
 steering.value = True  # Set GPIO13 low
-
+# Shared resources
+annotated_frame = None  # Updated by the detection thread
+frame1 = None  # Updated by the camera thread
 # global cap for camera
 cap = DepthCamera()
 
@@ -110,6 +113,7 @@ out_annotated = None
 
 # Initialize pygame
 pygame.init()
+clock = pygame.time.Clock()
 
 # Get screen resolution for fullscreen mode
 info = pygame.display.Info()
@@ -119,56 +123,147 @@ screen_height = info.current_h
 # Configure Pygame for a transparent window
 os.environ['SDL_VIDEO_WINDOW_POS'] = "0,0"
 os.environ['SDL_VIDEO_CENTERED'] = "1"
-pygame.display.set_mode((screen_width, screen_height), pygame.FULLSCREEN | pygame.SRCALPHA)
 
-# Create a transparent surface for the overlay
-overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+class Lidar:
 
+    def get_data(self):
+        """Fetch scan data from the LiDAR."""
+        print ("1")
+        return self.lidar.get_scan_as_xy(filter_quality=True)
 
-# Lock mouse and keyboard to Pygame window
-pygame.event.set_grab(True)
+    def stop(self):
+        """Stop the LiDAR motor."""
+        print ("2")
+        self.lidar.stopmotor()
 
+    def __init__(self, max_retries=5, retry_delay=5):
+        """
+        Initialize the Lidar class with retry functionality.
+        
+        :param max_retries: Maximum number of retry attempts.
+        :param retry_delay: Delay (in seconds) between retries.
+        """
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.connect_with_retry()
+        print ("3")
 
-# Function for LIDAR detection
-def detect_zones():
-    retries = 0
-    while retries < MAX_RETRIES:
-        try:
-            lidar = RPLidar(PORT_NAME, baudrate=BAUD_RATE, timeout=1)
-            lidar.start_motor()
-            print("LIDAR motor started. Scanning for zones...")
-
-            for scan in lidar.iter_scans():
-                global red_zone, green_zone
-                red_zone = False
-                green_zone = False
-
-                for (_, angle, distance) in scan:
-                    distance_meters = distance / 1000.0
-                    if (FRONT_ANGLE_MIN <= angle <= 360) or (0 <= angle <= FRONT_ANGLE_MAX):
-                        if MIN_VALID_DISTANCE <= distance_meters <= MAX_VALID_DISTANCE:
-                            if distance_meters <= RED_ZONE_THRESHOLD:
-                                red_zone = True
-                            elif distance_meters > GREEN_ZONE_THRESHOLD:
-                                green_zone = True
-
-                # Print zone statuses
-                if red_zone:
-                    print(f"Red Zone: Object detected within {RED_ZONE_THRESHOLD} meters.")
-                elif green_zone:
-                    print(f"Green Zone: Object farther than {GREEN_ZONE_THRESHOLD} meters.")
+    def connect_with_retry(self):
+        """Attempt to connect to the LiDAR with retries."""
+        attempts = 0
+        while attempts < self.max_retries:
+            try:
+                print(f"Connecting to LiDAR (Attempt {attempts + 1}/{self.max_retries})...")
+                self.lidar = FastestRplidar()
+                # Start connection with a timeout
+                connection_successful = self.connect_with_timeout(self.lidar.connectlidar, timeout=self.retry_delay)
+                
+                if not connection_successful:
+                    attempts += 1
+                    print(f"LIDAR connection timed out. Retrying in {self.retry_delay} seconds...")
+                    time.sleep(self.retry_delay)
+                    continue
+                # Start the LiDAR motor
+                print ("d")
+                print ("de")
+           
+                self.lidar.startmotor(my_scanmode=2)
+                                  
+                # Verify the connection (example: fetch a sample scan)
+                test_data = self.lidar.get_scan_as_xy(filter_quality=False)
+                if test_data:  # If data is received, the connection is valid
+                    print("Connection successful!")
+                    return
                 else:
-                    print("No object detected in the front 30° zone.")
-        except Exception as e:
-            print(f"Error: {e}")
-            retries += 1
-            time.sleep(RETRY_DELAY)
-        finally:
-            lidar.stop_motor()
-            lidar.disconnect()
+                    raise RuntimeError("Connection verification failed. No data received.")
+            except KeyboardInterrupt:
+                self.lidar.stopmotor()
+                print("STOP")
 
-    print("LIDAR detection stopped.")
 
+            except serial.SerialException as e:
+                print(f"Serial connection error: {e}")
+                attempts += 1
+                print(f"Connection failed: {e}. Retrying in {self.retry_delay} seconds...")
+                time.sleep(self.retry_delay)
+
+            except Exception as e:
+                attempts += 1
+                print(f"Connection failed: {e}. Retrying in {self.retry_delay} seconds...")
+                time.sleep(self.retry_delay)
+
+
+
+     # Ensure the LIDAR object is stopped/released to avoid conflicts
+            if self.lidar:
+                try:
+                    self.lidar.stopmotor()
+                except Exception as cleanup_error:
+                    print(f"Failed to stop motor during cleanup: {cleanup_error}")
+                self.lidar = None  # Reset the LIDAR object for the next attempt
+
+        # If all attempts fail, raise an exception
+        raise RuntimeError("Failed to connect to LiDAR after multiple attempts.")
+
+    def connect_with_timeout(self, func, timeout=2):
+        """
+        Run a function with a timeout.
+        
+        :param func: The function to execute.
+        :param timeout: Maximum time (in seconds) to wait before timeout.
+        :return: True if successful, False if timed out.
+        """
+        result = [False]  # Shared variable to track success
+
+        def target():
+            try:
+                func()
+                result[0] = True  # Mark as successful
+            except Exception as e:
+                print(f"Error during connection: {e}")
+
+        # Start the function in a thread
+        timer_thread = Timer(timeout, target)
+        timer_thread.start()
+        timer_thread.join(timeout)
+
+        return result[0]
+
+lidar = Lidar()
+
+
+def detect_zones():
+    global exit_flag, lidar_detect
+            
+    while not exit_flag:
+        # Get LiDAR data
+        scan_data = lidar.get_data()
+        as_np = np.asarray(scan_data)
+
+        # Update plot data
+        x_data = -as_np[:, 1]
+        y_data = -as_np[:, 0]
+
+        # Check each point to see if it is inside the triangle
+        for x, y in zip(x_data, y_data):
+            if is_point_in_triangle(x, y):
+                lidar_detect = True
+                print(f"Point inside triangle detected: ({x:.2f}, {y:.2f})")
+            else:
+                lidar_detect = False
+        # Update the plot
+        time.sleep(0.05)
+
+    # Stop the LiDAR before exiting
+    lidar.stop()
+
+def is_point_in_triangle(x, y):
+    """Check if a point (x, y) is inside the triangle."""
+    # Conditions for the triangle:
+    # 1. Below y = 1.2x (Red line)
+    # 2. Above y = -1.2x (Purple line)
+    # 3. Above y = -1250 (Horizontal black line)
+    return y <= 1.2 * x and y <= -1.2 * x and y >= -1250 and y < 0
 
 def get_center_of_bbox(box):
     """ Calculate the center point of the bounding box """
@@ -177,19 +272,27 @@ def get_center_of_bbox(box):
     return (x_center, y_center)
 
 
-def detection(cap):
+def detection():
     #global variables to pass
-    global class_ids, annotated_frame
+    global class_ids, annotated_frame, keys, exit_flag
+    screen = pygame.display.set_mode((screen_width, screen_height), pygame.FULLSCREEN | pygame.SRCALPHA)
+
+    # Create a transparent surface for the overlay
+    overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
 
 
-    time.sleep(1)  # Simulate detection processing time
+    # Lock mouse and keyboard to Pygame window
+    pygame.event.set_grab(True)
 
-    while True:
+    while not exit_flag:
+        pygame.event.pump()
+
+        # Poll for pygame events
+        keys = pygame.key.get_pressed()
         ret, success, frame = cap.get_frame()
         if not ret:
             print("Failed to grab frame")
-            continue
-
+            
 
         # Run YOLO detection if enabled
         results = model(frame, conf=0.5, verbose=False, device=0)  # Running detection
@@ -198,24 +301,6 @@ def detection(cap):
         clss = results[0].boxes.cls.cpu().tolist()
 
         annotator = Annotator(annotated_frame, line_width=2, example=names)
-        annotated_frame = cv2.resize(annotated_frame, (screen_width, screen_height))            
-
-        # Convert frame from BGR to RGB (OpenCV uses BGR by default, Pygame uses RGB)
-        annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-
-        # Create a Pygame surface from the camera frame
-        camera_surface = pygame.image.frombuffer(annotated_frame.tobytes(), (annotated_frame.shape[1], annotated_frame.shape[0]), "RGB")
-
-        # Display the camera feed
-        screen = pygame.display.get_surface()
-        screen.blit(camera_surface, (0, 0))
-
-        # Add transparent overlay (draw shapes, text, etc. on the overlay surface)
-        overlay.fill((0, 0, 0, 0))  # Reset transparent surface
-        screen.blit(overlay, (0, 0))  # Overlay on top of the camera feed
-
-        # Update display
-        pygame.display.update()
 
         if boxes:
             for box, cls in zip(boxes, clss):
@@ -225,11 +310,10 @@ def detection(cap):
                 center_point = get_center_of_bbox(box)
                 # x_center = center_point[0] * (screen_width/640)
                 # y_center = center_point[1] * (screen_height/480)
-                print(center_point)
                 cv2.circle(annotated_frame, center_point, 5, (0, 0, 255), -1)
                 distance = success[center_point[1] , center_point[0]]
                 cv2.putText(annotated_frame, "{}mm".format(distance), (center_point[0], center_point[1] - 20), cv2.FONT_HERSHEY_PLAIN, 2, (0, 0, 0), 2)
-        
+            
         # Process and print class names for each detection
         for result in results:
             class_ids = result.boxes.cls.tolist()
@@ -239,6 +323,23 @@ def detection(cap):
         class_counts = Counter(class_names)
         for class_name, count in class_counts.items():
             print(f"{count} {class_name} detected.")
+
+        # Resize image to screen size
+        annotated_frame = cv2.resize(annotated_frame, (screen_width, screen_height))       
+        # Convert frame from BGR to RGB (OpenCV uses BGR by default, Pygame uses RGB)
+        annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)     
+
+        # Create a Pygame surface from the camera frame
+        camera_surface = pygame.image.frombuffer(annotated_frame.tobytes(),(annotated_frame.shape[1], annotated_frame.shape[0]),"RGB")
+
+        screen.fill((0, 0, 0))  # Clear the screen with black
+
+        try:
+            screen.blit(camera_surface, (0, 0))
+            pygame.display.update()
+        except Exception as e:
+            print(f"Error during rendering: {e}")
+        clock.tick(30)  # Limit to 30 FPS
 
 
 def camera(cap1):
@@ -280,7 +381,7 @@ odrv0.axis1.requested_state = 8 # Start Motor
 
 
 def Manual_drive(keys, class_ids):
-        global Steering, start_mode, red_zone, green_zone
+        global Steering, start_mode, lidar_detect
 
         # Read potentiometer value
         try:
@@ -307,7 +408,7 @@ def Manual_drive(keys, class_ids):
                 odrv0.axis0.requested_state = 1  # Set ODrive to idle state
 
         # 'w' key to move forward
-        if keys[pygame.K_w] and green_zone:
+        if keys[pygame.K_w]:
             odrv0.axis1.controller.input_vel = -1
             odrv0.axis0.controller.input_vel = -1  
             print ('FORWARD')
@@ -316,7 +417,7 @@ def Manual_drive(keys, class_ids):
         if odrv0.axis1.controller.input_vel >= -1:
             
             # People or Stop sign detected
-            if 4 in class_ids or 8 in class_ids or red_zone:
+            if 4 in class_ids or 8 in class_ids or lidar_detect:
                 print("Stop")
                 odrv0.axis1.controller.input_vel = 0
                 odrv0.axis0.controller.input_vel = 0
@@ -405,30 +506,27 @@ def Manual_drive(keys, class_ids):
         
 def main():
     # global exit variable
-    global exit_flag, run_detection, recording, out_annotated, img_counter, vid_counter, red_zone , green_zone
+    global exit_flag, recording, out_annotated, img_counter, vid_counter, annotated_frame, keys
     # Start lane detection in a separate thread or process
     # Main event loop
     while not exit_flag:
-        # Poll for pygame events
-        pygame.event.pump()
-        keys = pygame.key.get_pressed()
-        detection()
+
         camera(cap1)
 
         Manual_drive(keys, class_ids)
-
         pot_value = Manual_drive(keys, class_ids)
-                    
         if pot_value == None:
             continue
+
         # If recording, write the frame to the video output file
         if recording:
             out_annotated.write(annotated_frame)
             out_combined.write(frame1)
+        
+
+
         # Change Running Detection or not
         if keys[pygame.K_m]:
-            run_detection = not run_detection # Toggle run_detection
-            print (f"Object Detection is now: [{run_detection}]")
             odrv0.axis1.controller.input_vel = 0
             odrv0.axis1.controller.input_vel = 0
 
@@ -437,7 +535,6 @@ def main():
             print("Exiting...")
             odrv0.axis1.controller.input_vel = 0
             odrv0.axis0.controller.input_vel = 0
-            odrv0.reboot()
             exit_flag = True       
             break
 
@@ -474,33 +571,43 @@ def main():
         # 'l' key to see status
         elif keys[pygame.K_l]: 
             print("Status:")
-            print ("Detection:",[{run_detection}])
             print ("recording:",[{recording}])
 
+        cv2.waitKey(1)
+
+    exit_flag = True
     #Quit all components
     pygame.quit()
     cap.release()
     cv2.destroyAllWindows()  # Close windows after exiting
+    odrv0.reboot()
     print("Exiting all components.")
-    exit_flag = False
 
 
 if  __name__ == '__main__':
-      # Start YOLO detection thread
-        detection_thread = threading.Thread(target=detection(cap), daemon=True)
+              # Start YOLO detection thread
+        detection_thread = threading.Thread(target=detection, daemon=True)
         # Start LIDAR detection thread
         lidar_thread = threading.Thread(target=detect_zones, daemon=True)
 
-        # main_thread = threading.Thread(target=main,daemon= True)
+        main_thread = threading.Thread(target=main,daemon= True)
         # Start both threads
-        detection_thread.start()
-        # main_thread.start()
         lidar_thread.start()
+        # detection_thread.start()
+        # main_thread.start()
+
         # Wait for threads to finish (Ctrl+C to stop)
         try:
             while True:
                 time.sleep(1)  # Keep the main thread alive
         except KeyboardInterrupt:
+            lidar.stop()
             print("Stopping all threads...")
-
+            odrv0.axi0.controller.input_vel = 0
+            odrv0.axis1.controller.input_vel = 0
+            odrv0.axis1.requested_state = 1
+            odrv0.axis0.requested_state = 1
+            pygame.quit()
+            cap.release()
+            cv2.destroyAllWindows()  # Close windows after exiting
         # main()
