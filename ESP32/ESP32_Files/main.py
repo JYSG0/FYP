@@ -30,7 +30,7 @@ aioble.register_services(ble_service)
 my_gps = MicropyGPS()
 
 #Define the UART pins and create a UART object
-#gps_serial = machine.UART(2, baudrate=9600, tx=17, rx=16)	#gps rx ->SD2 = GPIO 9,  gps tx ->SD3 = GPIO 10
+gps_serial = machine.UART(2, baudrate=9600, tx=17, rx=16)
 
 #Define the SCL and SDA pins
 i2c = I2C(1, scl=Pin(22), sda=Pin(21), freq=100000)
@@ -55,13 +55,6 @@ previousRouteActive = False
 
 data_buffer = bytearray()
 
-lon = [103.7777, -74.004917, -74.006252, -74.006204, -74.006415, -74.00735]
-lat = [1.3114, 40.713438, 40.714023, 40.714127, 40.714225, 40.713103]
-latitude = 1.3114
-longitude = 103.7777
-azimuth = 20
-direction = 'North'
-message = ['test', 'test1', 'start', 'forward', 'backward', 'stop','start', 'forward', 'backward', 'stop']
 compass_data = {}
 gps_data = {}
 dataToSend = {}
@@ -69,21 +62,32 @@ dataToSend = {}
 #Calibrate compass
 def calibrateCompass():
     print("Calibrating... Move the sensor around.")
+    calibrate = {
+        'type': 'calibration',
+        'calibration': 'Calibrate compass now'
+    }
+    await dataToSend(calibrate)
+    
     x_offset, y_offset, z_offset, x_scale, y_scale, z_scale = qmc5883.calibrate()
     print("Calibration complete.")
+    
+    calibrate = {
+        'type': 'calibration',
+        'calibration': 'Calibration finsihed'
+    }
+    
+    await dataToSend(calibrate)
+    
     print(f"Offsets: X={x_offset}, Y={y_offset}, Z={z_offset}")
     print(f"Scales: X={x_scale}, Y={y_scale}, Z={z_scale}")
     
 #Function to read compass values
 async def readCompass():
     global azimuth, direction, compass_data
-    #x , y, z, _ = qmc5883.read_raw()  #Read raw values of compass
-    #x_calibrated, y_calibrated, _ = qmc5883.apply_calibration(x, y, z)  #Calibrated values from offset and scale
-    #azimuth = qmc5883.calculate_azimuth(x_calibrated, y_calibrated)
-    #direction = qmc5883.get_cardinal_direction(azimuth)
-    
-    azimuth = 20
-    direction = 'North'
+    x , y, z, _ = qmc5883.read_raw()  #Read raw values of compass
+    x_calibrated, y_calibrated, _ = qmc5883.apply_calibration(x, y, z)  #Calibrated values from offset and scale
+    azimuth = qmc5883.calculate_azimuth(x_calibrated, y_calibrated)
+    direction = qmc5883.get_cardinal_direction(azimuth)
     
     #Send data to webserver
     compass_data = {
@@ -95,44 +99,48 @@ async def sendData(data):
     dataToSend = ujson.dumps(data).encode('utf-8')
     print("Sending combined data: ", dataToSend)
     sensor_characteristic.write(dataToSend, send_update=True)
-    await asyncio.sleep_ms(1000)
+    await asyncio.sleep_ms(500)
 
 #Function to read GPS values
 async def readGPS():
     global latitude, longitude, gps_data
-    #latitude_str = my_gps.latitude_string()
-    #longitude_str = my_gps.longitude_string()
+    while gps_serial.any():
+        data = gps_serial.read()	#Get GPS data
+        for byte in data:
+            stat = my_gps.update(chr(byte))
+            if stat is not None:
+                latitude_str = my_gps.latitude_string()
+                longitude_str = my_gps.longitude_string()
 
-    #Parse latitude
-    #lat_deg = int(latitude_str.split('°')[0])
-    #lat_min = float(latitude_str.split('°')[1].split("'")[0])
-    #lat_dir = latitude_str[-1]  #Get direction (N/S)
+                #Parse latitude
+                lat_deg = int(latitude_str.split('°')[0])
+                lat_min = float(latitude_str.split('°')[1].split("'")[0])
+                lat_dir = latitude_str[-1]  #Get direction (N/S)
 
-    #Parse longitude
-    #lon_deg = int(longitude_str.split('°')[0])
-    #lon_min = float(longitude_str.split('°')[1].split("'")[0])
-    #lon_dir = longitude_str[-1]  #Get direction (E/W)
+                #Parse longitude
+                lon_deg = int(longitude_str.split('°')[0])
+                lon_min = float(longitude_str.split('°')[1].split("'")[0])
+                lon_dir = longitude_str[-1]  #Get direction (E/W)
 
-    #Convert to decimal degrees
-    #latitude = dmm_to_dd(lat_deg, lat_min, lat_dir)
-    #longitude = dmm_to_dd(lon_deg, lon_min, lon_dir)
+                #Convert to decimal degrees
+                latitude = dmm_to_dd(lat_deg, lat_min, lat_dir)
+                longitude = dmm_to_dd(lon_deg, lon_min, lon_dir)
 
-    #Get precision performance
-    #satellites = my_gps.satellites_in_use()
-    #precision = my_gps.hdop()
-
-    #print('satellites: ', satellites)
-    #print('precision: ', precision)
-    
-    latitude = 1.3114
-    longitude = 103.7777
-    
-    #Send data to web server
-    gps_data = {
-        "latitude": latitude,
-        "longitude": longitude,
-    }
-    
+                #Get precision performance
+                #satellites = my_gps.satellites_in_use()
+                #precision = my_gps.hdop()
+                
+                #print('lat:', latitude)
+                #print('lon:', longitude)
+                #print('satellites: ', satellites)
+                #print('precision: ', precision)
+                
+                #Send data to web server
+                gps_data = {
+                    "latitude": latitude,
+                    "longitude": longitude,
+                }
+            
 def convert_to_sgt(utc_time):
     hour, minute, second = utc_time
     hour += 8  #Adjust for Singapore Time (SGT)
@@ -180,103 +188,100 @@ def haversine_Bearing(lat1, lon1, lat2, lon2):
 async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turningPoints, currentLat, currentLon, threshold=0.8):  #Check back to see if need bearingWLocations
     global azimuth, currentStep, reachedDestination, dataToSend
     tolerance = 10	#+- of angle to turn
+    reachedDestination = False
     
-    if currentStep >= len(turningPoints):
-        print("Destination reached, stop vehicle")
-        reachedDestination = True
-        msg = "arrive"
-        dataToSend = {}
+    print('currentStep: ', currentStep)
+    #Fetch the current turning point based on currentStep
+    print('turningPoints[currentStep]: ', turningPoints[currentStep])
+    turnLon, turnLat = turningPoints[currentStep]
+    print(f'turnLon: {turnLon}, turnLat: {turnLat}')
+    target_bearing = bearingAfter[currentStep]
+    maxTargetBearing = (target_bearing + tolerance) % 360
+    minTargetBearing = (target_bearing - tolerance + 360) % 360
+
+    if minTargetBearing < maxTargetBearing:  #Standard range
+        within_tolerance = minTargetBearing <= azimuth <= maxTargetBearing
+    else:  #Wrap-around range
+        within_tolerance = azimuth >= minTargetBearing or azimuth <= maxTargetBearing
+
+    #Print current coordinates and the target turning point
+    print(f"Current Location: Latitude: {currentLat}, Longitude: {currentLon}")
+    print(f"Next Turning Point: Latitude: {turnLat}, Longitude: {turnLon}")
     
-    else:
-        reachedDestination = False
-        
-        print('currentStep: ', currentStep)
-        #Fetch the current turning point based on currentStep
-        print('turningPoints[currentStep]: ', turningPoints[currentStep])
-        turnLon, turnLat = turningPoints[currentStep]
-        print(f'turnLon: {turnLon}, turnLat: {turnLat}')
-        target_bearing = bearingAfter[currentStep]
-        maxTargetBearing = (target_bearing + tolerance) % 360
-        minTargetBearing = (target_bearing - tolerance + 360) % 360
+    #Calculate the distance to the current turning point
+    _, distance_to_turn = haversine_Bearing(currentLat, currentLon, turnLat, turnLon)
 
-        if minTargetBearing < maxTargetBearing:  #Standard range
-            within_tolerance = minTargetBearing <= azimuth <= maxTargetBearing
-        else:  #Wrap-around range
-            within_tolerance = azimuth >= minTargetBearing or azimuth <= maxTargetBearing
-
-        #Print current coordinates and the target turning point
-        print(f"Current Location: Latitude: {currentLat}, Longitude: {currentLon}")
-        print(f"Next Turning Point: Latitude: {turnLat}, Longitude: {turnLon}")
-        
-        #Calculate the distance to the current turning point
-        _, distance_to_turn = haversine_Bearing(currentLat, currentLon, turnLat, turnLon)
-
-        print("")
-        print(distance_to_turn)	#debugging line
-        distance_to_turn = distance_to_turn - 5
-        print(distance_to_turn)
-        
-        if distance_to_turn <= threshold:
-            action = f"Action (Time to turn!)"
-            modifier = modifiers[currentStep]
-            #Check azimuth to target_bearing
-            angleToTurn = abs((bearingAfter[currentStep] - azimuth + 180) % 360 - 180)   #positive is left, negative is right
-        
-            #If the turnType is a turn
-            if 'turn' in modifier:
-                    turnOri = turns[currentStep]
-                    angle = bearingBefore[currentStep] - target_bearing
-                    msg = f"Turn {turnOri} {abs(angle):.2f} degrees."
-
-                    if within_tolerance:
-                        msg += " Stop turning, angle reached."
-                        currentStep += 1  #Proceed to the next step
-                    else:
-                        msg += " Keep turning."
-                #action = f"{action} for {angle} degrees, {turnOri}"
-            
-            elif 'depart' in modifier:
-                msg = "Depart."
+    print("")
+    print(distance_to_turn)	#debugging line
+    distance_to_turn = distance_to_turn - 5
+    print(distance_to_turn)
+    modifier = modifiers[currentStep]
+    
+    if distance_to_turn <= threshold:
+        action = f"Action (Time to turn!)"
+        #Check azimuth to target_bearing
+        #angleToTurn = abs((bearingAfter[currentStep] - azimuth + 180) % 360 - 180)   #positive is left, negative is right
+    
+        #If the turnType is a turn
+        if 'turn' in modifier:
+                turnOri = turns[currentStep]
+                #angle = bearingBefore[currentStep] - target_bearing #Set
+                angle = (bearingBefore[currentStep] - target_bearing + 180) % 360 - 180
+                
+                msg = f"Turn {turnOri} {abs(angle):.2f} degrees."
 
                 if within_tolerance:
                     msg += " Stop turning, angle reached."
                     currentStep += 1  #Proceed to the next step
                 else:
                     msg += " Keep turning."
+            #action = f"{action} for {angle} degrees, {turnOri}"
+        
+        elif 'depart' in modifier:
+            msg = "Depart."
 
-            elif 'fork' in modifier:
-                turnOri = turns[currentStep]
-                msg = f"fork {turnOri}"
+            if within_tolerance:
+                msg += " Stop turning, angle reached."
                 currentStep += 1  #Proceed to the next step
+            else:
+                msg += " Keep turning."
 
-            print(action)
-            #await sensor_characteristic.write(msg)
-            print(currentStep)
+        elif 'arrive' in modifier:
+            msg = "Arrive"
+            reachedDestination = True
 
-        else:
-            #Continue moving towards the turning point
-            msg = f"Keep going straight. Distance to next turn: {distance_to_turn:.2f} meters."
-            time.sleep(1)  #Simulate movement delay
-        
-        print(msg)
-        
-        dataToSend = {
-            "type": "vehicleControl",
-            "msg": msg,
-            "currentStep": currentStep,
-            "distanceToTurn": distance_to_turn
-        }
-        #moveVehicle(msg)	#Function to actually move vehicle according to action
+            print("Destination reached, stop vehicle")
+
+            if within_tolerance:
+                msg += " Stop turning, angle reached."
+            else:
+                msg += " Keep turning."
+
+        print(action)
+        #await sensor_characteristic.write(msg)
+        print(currentStep)
+
+    else:
+        #Continue moving towards the turning point
+        msg = f"Keep going straight. Distance to next turn: {distance_to_turn:.2f} meters."
+        time.sleep(1)  #Simulate movement delay
+        angle = 0
+        #angleToTurn = 0
+        within_tolerance = False
+    
+    print(msg)
+    
+    dataToSend = {
+        "type": "vehicleControl",
+        "msg": msg,
+        "currentStep": currentStep,
+        "distanceToTurn": distance_to_turn,
+        "modifier": modifier,
+        "angleToTurn": angle,
+        "within_tolerance": within_tolerance
+    }
         
     await sendData(dataToSend)
-        
-#Send message to Jetson to move vehicle
-async def moveVehicle(msg):
-    data = {
-        'type': 'msg',  #The action you want the vehicle to perform
-        'msg': msg  #Any other data you want to send
-    }
-    await sendData(data)
 
 #Prepare to start main - functions that run before the main but only once
 def prepare():
@@ -289,7 +294,7 @@ def prepare():
     
     #Run the main task
     reset_coordinates()
-    #calibrateCompass()
+    calibrateCompass()
 
 #Function to decode and process the received JSON data
 def _decode_data(data):
@@ -297,6 +302,7 @@ def _decode_data(data):
         print(f"Decoding JSON data: {data}")
         
         #Validate JSON format
+        
         if data.startswith("{") and data.endswith("}"):
             json_data = ujson.loads(data)
             print(f"Decoded JSON: {json_data}")
@@ -347,6 +353,8 @@ def sanitize_json(data):
         fixed_data = fixed_data.replace('"waypints":', '"waypoints":')
         fixed_data = fixed_data.replace('deart:', '"depart":')
         fixed_data = fixed_data.replace('arrie:', '"arrive":')
+        fixed_data = fixed_data.replace('lft:', '"left":')
+        fixed_data = fixed_data.replace('rght:', '"right":')
 
         # Step 2: Fix incorrect booleans and typos
         fixed_data = fixed_data.replace('rue', 'true')
@@ -369,8 +377,9 @@ def sanitize_json(data):
         fixed_data = fixed_data.replace('" ', '"')
         
         # Step 5: Balance braces (manually handle missing closing braces)
-        if fixed_data.count('[') != fixed_data.count(']'):
-            fixed_data += ']'  # Add missing closing bracket for list
+        #if fixed_data.count('[') != fixed_data.count(']'):
+            #fixed_data += '['  # Add missing closing bracket for list
+        fixed_data = fixed_data.replace(', 10', ', [10')
 
         if fixed_data.count('{') != fixed_data.count('}'):
             fixed_data += '}'  # Add missing closing brace for object
@@ -424,17 +433,6 @@ async def main(connection):
             try:
                 
                 print(routeActive)
-                #latitude = lat[step]
-                #longitude = lon[step]
-                #msg = message[step]
-                #azimuth = 57.06517
-                #azimuth = round(azimuth, 4)
-                #direction = qmc5883.get_cardinal_direction(azimuth)
-                #if step >= len(lat):
-                #    step = 0  #Reset index to start over
-                #GPS logic
-                #latitude, longitude, satellites, precision = readGPS()
-                
                 if not reachedDestination:
                     print('received')
                     
@@ -465,6 +463,9 @@ async def main(connection):
                     previousRouteActive = routeActive;
                     #Inside the while connection is not None loop
                     await asyncio.sleep(0.5)  #Yield control to the event loop
+                
+                else:
+                    print('Route not started/Destination Reached')
 
             except Exception as e:
                     print(f"An error occurred: {e}")
