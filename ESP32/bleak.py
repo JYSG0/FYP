@@ -1,6 +1,5 @@
-#DEVICE_ADDRESS = "88:13:BF:6F:E0:B6"
 import asyncio
-from bleak import BleakClient
+from bleak import BleakClient, BleakError
 import json
 import websockets
 
@@ -8,117 +7,111 @@ import websockets
 DEVICE_ADDRESS = "88:13:BF:6F:E0:B6"
 
 SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214"
-SENSOR_CHAR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214"    #Same UUID as _BLE_SEND_UUID in ESP32. ESP32 uses this to send so bleak uses this to receive
-LED_UUID = '19b10002-e8f2-537e-4f6c-d104768a1214'    #Same UUID as _BLE_RECEIVE_UUID in ESP32. ESP32 uses this to receive and modify variables so bleak uses this to send
-
+SENSOR_CHAR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214"  # ESP32 sends to this UUID
+LED_UUID = "19b10002-e8f2-537e-4f6c-d104768a1214"          # ESP32 receives from this UUID
 
 WEBSOCKET_URL_FASTAPI = "ws://127.0.0.1:5501/ws"
 WEBSOCKET_URL_JETSON = "ws://127.0.0.1:8765/ws"
 
+
 async def list_services(client):
+    """Lists available BLE services and characteristics."""
     print("Listing services and characteristics:")
     for service in client.services:
         print(f"Service: {service.uuid}")
         for char in service.characteristics:
             print(f"  Characteristic: {char.uuid}, Properties: {char.properties}")
 
+
 async def read_sensor_data(client):
+    """Reads sensor data from BLE device."""
     try:
         sensor_data = await client.read_gatt_char(SENSOR_CHAR_UUID)
-        print(sensor_data)
-        data = sensor_data.decode('utf-8')
+        data = sensor_data.decode("utf-8")
         print(f"Sensor Data: {data}")
         return data
     except Exception as e:
         print(f"Error reading sensor data: {e}")
+        raise  # Propagate for reconnection
 
-async def read_data(client, websocketFastAPI, websocketJetson):
-    """Read data from BLE characteristics and send to WebSocket."""
-    try:
-        while True:
-            sensor_data = await read_sensor_data(client)
-            print(sensor_data)
-            if "msg" in sensor_data:
-                await websocketFastAPI.send(json.dumps(sensor_data))
-                await websocketJetson.send(json.dumps(sensor_data))
-            else: 
-                await websocketFastAPI.send(json.dumps(sensor_data))
-            print("sent")
-
-    except Exception as e:
-        print(f"Error reading data: {e}")
-
-async def process_websocket_messages(websocket, client):
-    """Handle WebSocket messages and send data via BLE."""
-    try:
-        while True:
-            try:
-                # Receive from WebSocket
-                response = await asyncio.wait_for(websocket.recv(), timeout=0.5)
-                print(f"Received from WebSocket: {response}")
-                
-                # Parse JSON data
-                JSONdata = json.loads(response)
-                print(JSONdata)
-
-                # Check if 'latitude', 'longitude', or 'msg' exists in the message
-                if "latitude" in JSONdata or "longitude" in JSONdata or "msg" in JSONdata:
-                    print("Message contains 'latitude', 'longitude', or 'msg'; skipping data echo.")
-                else:
-                    # Convert the data to JSON string
-                    JSONdata = json.dumps(JSONdata)
-                    print("Sending large JSON data in chunks...")
-                    await send_sensor_data(client, JSONdata)
-
-            except asyncio.TimeoutError:
-                pass  # No message received; continue loop
-
-    except Exception as e:
-        print(f"Error processing WebSocket messages: {e}")
 
 async def send_sensor_data(client, json_data):
+    """Sends JSON data to the BLE device in chunks."""
     try:
-        json_bytes = json_data.encode('utf-8')  # Convert JSON to bytes
-        chunk_size = 20  # Maximum number of bytes per chunk (BLE limit)
+        json_bytes = json_data.encode("utf-8")
+        chunk_size = 20
         total_chunks = len(json_bytes) // chunk_size + (1 if len(json_bytes) % chunk_size else 0)
-        
+
         for i in range(total_chunks):
             start_idx = i * chunk_size
             end_idx = start_idx + chunk_size
             chunk = json_bytes[start_idx:end_idx]
-            
-            # Indicate if it's the last chunk
             is_last_chunk = 1 if i == total_chunks - 1 else 0
-            
-            # Prepare the chunk with metadata (start/end indicator)
             chunk_with_metadata = bytes([is_last_chunk]) + chunk
-            
-            # Send the chunk
             await client.write_gatt_char(LED_UUID, chunk_with_metadata)
             print(f"Sent chunk {i + 1}/{total_chunks}")
-            
-            await asyncio.sleep(0.1)  # Small delay between chunks
-
+            await asyncio.sleep(0.1)
     except Exception as e:
-        print(f"Error sending JSON in chunks: {e}")
+        print(f"Error sending data: {e}")
+        raise
+
+
+async def read_data(client, websocketFastAPI, websocketJetson):
+    """Reads BLE data and forwards it to WebSocket."""
+    try:
+        while True:
+            sensor_data = await read_sensor_data(client)
+            if sensor_data:
+                await websocketFastAPI.send(json.dumps({"sensor_value": sensor_data}))
+                await websocketJetson.send(json.dumps({"sensor_value": sensor_data}))
+                print("Sent sensor data to WebSockets")
+            await asyncio.sleep(1)  # Adjust interval as needed
+    except Exception as e:
+        print(f"Error reading BLE data: {e}")
+        raise
+
+
+async def process_websocket_messages(websocket, client):
+    """Processes incoming WebSocket messages and sends them to BLE."""
+    try:
+        while True:
+            try:
+                message = await asyncio.wait_for(websocket.recv(), timeout=0.5)
+                print(f"Received WebSocket message: {message}")
+
+                # Forward valid data to BLE
+                JSONdata = json.loads(message)
+                if "latitude" not in JSONdata and "longitude" not in JSONdata:
+                    await send_sensor_data(client, json.dumps(JSONdata))
+
+            except asyncio.TimeoutError:
+                continue  # No message; continue listening
+    except Exception as e:
+        print(f"Error processing WebSocket messages: {e}")
+        raise
+
 
 async def main():
-    async with BleakClient(DEVICE_ADDRESS) as client:
-        print(f"Connected to {DEVICE_ADDRESS}")
-        await list_services(client)
+    """Main loop managing BLE and WebSocket connections."""
+    while True:
+        try:
+            async with BleakClient(DEVICE_ADDRESS) as client:
+                print(f"Connected to BLE device: {DEVICE_ADDRESS}")
+                await list_services(client)
 
-        async with websockets.connect(WEBSOCKET_URL_FASTAPI) as websocketFastAPI, \
-                   websockets.connect(WEBSOCKET_URL_JETSON) as websocketJetson:
-            try:
-                # Run read_data and process_websocket_messages concurrently
-                await asyncio.gather(
-                    read_data(client, websocketFastAPI, websocketJetson),
-                    process_websocket_messages(websocketFastAPI, client)
-                )
-            except (asyncio.CancelledError, KeyboardInterrupt):
-                print("Stopped by user.")
-            except Exception as e:
-                print(f"Error in main loop: {e}")
+                async with websockets.connect(WEBSOCKET_URL_FASTAPI) as websocketFastAPI, \
+                        websockets.connect(WEBSOCKET_URL_JETSON) as websocketJetson:
+                    await asyncio.gather(
+                        read_data(client, websocketFastAPI, websocketJetson),
+                        process_websocket_messages(websocketFastAPI, client)
+                    )
+        except (BleakError, websockets.ConnectionClosedError) as e:
+            print(f"Connection error: {e}. Reconnecting...")
+            await asyncio.sleep(1)
+        except Exception as e:
+            print(f"Unexpected error: {e}. Reconnecting...")
+            await asyncio.sleep(1)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
