@@ -60,13 +60,14 @@ gps_data = {}
 dataToSend = {}
 
 #Calibrate compass
-def calibrateCompass():
+async def calibrateCompass():
     print("Calibrating... Move the sensor around.")
     calibrate = {
         'type': 'calibration',
         'calibration': 'Calibrate compass now'
     }
-    await dataToSend(calibrate)
+    print(calibrate)
+    await sendData(calibrate)
     
     x_offset, y_offset, z_offset, x_scale, y_scale, z_scale = qmc5883.calibrate()
     print("Calibration complete.")
@@ -76,7 +77,7 @@ def calibrateCompass():
         'calibration': 'Calibration finsihed'
     }
     
-    await dataToSend(calibrate)
+    await sendData(calibrate)
     
     print(f"Offsets: X={x_offset}, Y={y_offset}, Z={z_offset}")
     print(f"Scales: X={x_scale}, Y={y_scale}, Z={z_scale}")
@@ -284,7 +285,7 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
     await sendData(dataToSend)
 
 #Prepare to start main - functions that run before the main but only once
-def prepare():
+async def prepare():
     global latitude, longitude, azimuth, direction, startLat, startLon, endLat, endLon, lat, lon
     global currentStep, reachedDestination, modifiers, bearingAfter, turns, step, matchedBearing, routeActive, previousRouteActive
     step = 0
@@ -294,7 +295,7 @@ def prepare():
     
     #Run the main task
     reset_coordinates()
-    calibrateCompass()
+    await calibrateCompass()
 
 #Function to decode and process the received JSON data
 def _decode_data(data):
@@ -528,6 +529,7 @@ async def readSensors():
             
 #Main task - all happening simultaneously
 async def start():
+    await prepare()
     #Start advertising and GPS data task
     t1 = asyncio.create_task(peripheral_task())  #BLE peripheral task
     t2 = asyncio.create_task(wait_for_write())  #Getting data from the web server
@@ -536,7 +538,6 @@ async def start():
     await asyncio.gather(t1, t3)
 
 if __name__ == "__main__":
-    prepare()  # Initial setup
     try:
         asyncio.run(start())
     except KeyboardInterrupt:
