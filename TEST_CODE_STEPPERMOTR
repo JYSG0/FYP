@@ -1,0 +1,23 @@
+import Jetson.GPIO as GPIO
+
+# Define pins
+DIR_PIN = 17  # Replace with your chosen pin number
+PULSE_PIN = 18  # Replace with your chosen pin number
+
+# Setup
+GPIO.setmode(GPIO.BCM)  # Use BCM numbering
+GPIO.setup(DIR_PIN, GPIO.OUT)
+GPIO.setup(PULSE_PIN, GPIO.OUT)
+
+# Set direction (e.g., HIGH for clockwise, LOW for counter-clockwise)
+GPIO.output(DIR_PIN, GPIO.HIGH)
+
+# Generate pulses to move motor
+for _ in range(1000):  # Move 1000 steps
+    GPIO.output(PULSE_PIN, GPIO.HIGH)
+    time.sleep(0.001)  # Pulse duration
+    GPIO.output(PULSE_PIN, GPIO.LOW)
+    time.sleep(0.001)  # Step interval
+
+# Cleanup
+GPIO.cleanup()
