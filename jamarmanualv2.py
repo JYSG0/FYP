@@ -70,6 +70,7 @@ steering.value = False  # Set GPIO13 high
 Steering = False
 start_mode = True
 speed_mode = False
+people_detect = True
 steering_angle = 0
 pot_value = 0
 input_velocity = 1  # Global variable to track velocity for motors
@@ -330,7 +331,7 @@ def detection(cap, run_detection=True):
         cv2.imshow('YOLOv8 Detection', resized_frame)  
 
 def Manual_drive(class_ids):
-    global Steering, start_mode, pot_value, steering_angle, input_velocity,speed_mode
+    global Steering, start_mode, pot_value, steering_angle, input_velocity,speed_mode, people_detect
 
     # Read potentiometer value
     try:
@@ -358,6 +359,11 @@ def Manual_drive(class_ids):
             odrv0.axis1.requested_state = 1  # Set ODrive to idle state
             odrv0.axis0.requested_state = 1  # Set ODrive to idle state
 
+    if 0 in class_ids:
+        print("Go")
+        odrv0.axis1.controller.input_vel = -1
+        odrv0.axis0.controller.input_vel = -1
+
     if keyboard.is_pressed('w'):
         odrv0.axis1.controller.input_vel = -input_velocity
         odrv0.axis0.controller.input_vel = -input_velocity
@@ -381,14 +387,15 @@ def Manual_drive(class_ids):
             if keyboard.is_pressed('d'):
                 odrv0.axis1.controller.input_vel = -2
                 odrv0.axis0.controller.input_vel = -1
-
+   
         if odrv0.axis1.controller.input_vel >= -2:
 
-            # People or Stop sign detected
-            if 4 in class_ids or 8 in class_ids:
-                print("Stop")
-                odrv0.axis1.controller.input_vel = 0
-                odrv0.axis0.controller.input_vel = 0
+            if people_detect:
+                # People or Stop sign detected
+                if 4 in class_ids or 8 in class_ids:
+                        print("Stop")
+                        odrv0.axis1.controller.input_vel = 0
+                        odrv0.axis0.controller.input_vel = 0
 
             # Slow or Speed sign or Hump or Pedestrain Sign detected
             elif 6 in class_ids or 7 in class_ids or 1 in class_ids or 3 in class_ids:
@@ -401,6 +408,15 @@ def Manual_drive(class_ids):
         odrv0.axis0.controller.input_vel = input_velocity
         print(f"BACKWARD at speed: {input_velocity}")
 
+    if keyboard.is_pressed('o'):
+        people_detect = not people_detect
+        time.sleep(0.5)
+        if people_detect:  # Start people_detection
+            print("Detection On")
+
+        else:  # Stop people_detection
+             print("Detection Off")
+
     # 'shift' key to brake
     if keyboard.is_pressed('shift'):
         odrv0.axis1.controller.input_vel = 0
@@ -408,6 +424,8 @@ def Manual_drive(class_ids):
         input_velocity = 1
         
         print ('STOP')
+
+
     if 2 in class_ids and steering_angle is not None and steering_angle <= 39:
         pwm.value = True
         steering.value = False
