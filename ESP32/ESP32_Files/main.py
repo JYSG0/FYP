@@ -7,10 +7,18 @@ import aioble
 import bluetooth
 from micropyGPS import MicropyGPS
 import ujson
+import json
+import network
+from bluetooth import BLE
+
 #from micropython import const
 from machine import I2C, Pin
-from qmc5883L import QMC5883L
+from qmc5883L import HMC5883L	#Library for QMC5883L compass
 import struct
+
+ble = BLE()
+ble.active(True)
+ble.config(mtu=256)
 
 _BLE_SERVICE_UUID = bluetooth.UUID('19b10000-e8f2-537e-4f6c-d104768a1214')
 _BLE_SENSOR_CHAR_UUID = bluetooth.UUID('19b10001-e8f2-537e-4f6c-d104768a1214')  #GPS Data UUID
@@ -23,6 +31,16 @@ ble_service = aioble.Service(_BLE_SERVICE_UUID)
 sensor_characteristic = aioble.Characteristic(ble_service, _BLE_SENSOR_CHAR_UUID, read=True, notify=True)
 write_characteristic = aioble.Characteristic(ble_service, _BLE_WRITE_UUID, read=True, write=True, notify=True, capture=True)
 
+# Initialize the station (WiFi) interface
+sta_if = network.WLAN(network.STA_IF)
+
+# Activate the station interface
+sta_if.active(True)
+
+# Get the MAC address
+mac_address = sta_if.config('mac')
+formatted_mac = ':'.join(f'{b:02X}' for b in mac_address)
+
 #Register services
 aioble.register_services(ble_service)
 
@@ -33,9 +51,7 @@ my_gps = MicropyGPS()
 gps_serial = machine.UART(2, baudrate=9600, tx=17, rx=16)
 
 #Define the SCL and SDA pins
-i2c = I2C(1, scl=Pin(22), sda=Pin(21), freq=100000)
-#Place pins into qmc5883 compass library file
-qmc5883 = QMC5883L(i2c)
+compass = HMC5883L(scl=22, sda=21)
 
 #Variables
 instructions = []
@@ -60,35 +76,11 @@ gps_data = {}
 dataToSend = {}
 
 #Calibrate compass
-async def calibrateCompass():
-    print("Calibrating... Move the sensor around.")
-    calibrate = {
-        'type': 'calibration',
-        'calibration': 'Calibrate compass now'
-    }
-    print(calibrate)
-    await sendData(calibrate)
-    
-    x_offset, y_offset, z_offset, x_scale, y_scale, z_scale = qmc5883.calibrate()
-    print("Calibration complete.")
-    
-    calibrate = {
-        'type': 'calibration',
-        'calibration': 'Calibration finsihed'
-    }
-    
-    await sendData(calibrate)
-    
-    print(f"Offsets: X={x_offset}, Y={y_offset}, Z={z_offset}")
-    print(f"Scales: X={x_scale}, Y={y_scale}, Z={z_scale}")
-    
 #Function to read compass values
 async def readCompass():
     global azimuth, direction, compass_data
-    x , y, z, _ = qmc5883.read_raw()  #Read raw values of compass
-    x_calibrated, y_calibrated, _ = qmc5883.apply_calibration(x, y, z)  #Calibrated values from offset and scale
-    azimuth = qmc5883.calculate_azimuth(x_calibrated, y_calibrated)
-    direction = qmc5883.get_cardinal_direction(azimuth)
+    x, y, z = compass.read()
+    azimuth, direction = compass.format_result(x, y, z)
     
     #Send data to webserver
     compass_data = {
@@ -105,6 +97,7 @@ async def sendData(data):
 #Function to read GPS values
 async def readGPS():
     global latitude, longitude, gps_data
+    
     while gps_serial.any():
         data = gps_serial.read()	#Get GPS data
         for byte in data:
@@ -141,7 +134,7 @@ async def readGPS():
                     "latitude": latitude,
                     "longitude": longitude,
                 }
-            
+                
 def convert_to_sgt(utc_time):
     hour, minute, second = utc_time
     hour += 8  #Adjust for Singapore Time (SGT)
@@ -181,7 +174,7 @@ def haversine_Bearing(lat1, lon1, lat2, lon2):
     a = (math.sin(dlat / 2) ** 2 + 
          math.cos(lat1) * math.cos(lat2) * 
          math.sin(dlon / 2) ** 2)
-    distance = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)) * 10000  #Distance in meters
+    distance = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)) * 1000  #Distance in meters
 
     return compass_bearing, distance
 
@@ -214,22 +207,23 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
 
     print("")
     print(distance_to_turn)	#debugging line
-    distance_to_turn = distance_to_turn - 5
-    print(distance_to_turn)
-    modifier = modifiers[currentStep]
+    print(modifiers)
+    print(turns)
+    turn = turns[currentStep]
     
     if distance_to_turn <= threshold:
+        print("In threshold")
         action = f"Action (Time to turn!)"
         #Check azimuth to target_bearing
         #angleToTurn = abs((bearingAfter[currentStep] - azimuth + 180) % 360 - 180)   #positive is left, negative is right
-    
+        modifier = modifiers[currentStep]
+
         #If the turnType is a turn
-        if 'turn' in modifier:
-                turnOri = turns[currentStep]
+        if 'turn' in turn:
                 #angle = bearingBefore[currentStep] - target_bearing #Set
                 angle = (bearingBefore[currentStep] - target_bearing + 180) % 360 - 180
                 
-                msg = f"Turn {turnOri} {abs(angle):.2f} degrees."
+                msg = f"Turn {modifier} {abs(angle):.2f} degrees."
 
                 if within_tolerance:
                     msg += " Stop turning, angle reached."
@@ -238,16 +232,18 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
                     msg += " Keep turning."
             #action = f"{action} for {angle} degrees, {turnOri}"
         
-        elif 'depart' in modifier:
+        elif 'depart' in turn:
             msg = "Depart."
 
             if within_tolerance:
                 msg += " Stop turning, angle reached."
+                angle = 0
                 currentStep += 1  #Proceed to the next step
             else:
                 msg += " Keep turning."
+                angle = (azimuth - target_bearing + 180) % 360 - 180
 
-        elif 'arrive' in modifier:
+        elif 'arrive' in turn:
             msg = "Arrive"
             reachedDestination = True
 
@@ -255,8 +251,10 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
 
             if within_tolerance:
                 msg += " Stop turning, angle reached."
+                angle = 0
             else:
                 msg += " Keep turning."
+                angle = (azimuth - target_bearing + 180) % 360 - 180
 
         print(action)
         #await sensor_characteristic.write(msg)
@@ -267,6 +265,7 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
         msg = f"Keep going straight. Distance to next turn: {distance_to_turn:.2f} meters."
         time.sleep(1)  #Simulate movement delay
         angle = 0
+        modifi = None
         #angleToTurn = 0
         within_tolerance = False
     
@@ -295,24 +294,8 @@ async def prepare():
     
     #Run the main task
     reset_coordinates()
-    await calibrateCompass()
-
+    
 #Function to decode and process the received JSON data
-def _decode_data(data):
-    try:
-        print(f"Decoding JSON data: {data}")
-        
-        #Validate JSON format
-        
-        if data.startswith("{") and data.endswith("}"):
-            json_data = ujson.loads(data)
-            print(f"Decoded JSON: {json_data}")
-            assignData(json_data)
-            
-        else:
-            raise ValueError("Data is not valid JSON")
-    except Exception as e:
-        print(f"Error decoding received data: {e}")
 
 #Function to assign data to their respective variables
 def assignData(data):
@@ -321,74 +304,102 @@ def assignData(data):
     
     if data["type"] == 'modifier':
         modifiers = data['modifier']
-        print(modifiers)
+        print("modifier: ", modifiers)
     elif data["type"] == 'w':
         turningPoints = data['waypoints']
-        print(turningPoints)
+        print("turningPoints: ",turningPoints)
     elif data["type"] == 'bearingBefore':
         bearingBefore = data['bearingBefore']
-        print(bearingBefore)
+        print("bearingBefore: ",bearingBefore)
     elif data["type"] == 'bearingAfter':
         bearingAfter = data['bearingAfter']
-        print(bearingAfter)
+        print("bearingAfter: ",bearingAfter)
     elif data["type"] == 'turnTypes':
         turns = data['turnTypes']
-        print(turns)
+        print("turns: ",turns)
     elif data["type"] == 'routeActive':
         routeActive = data['routeActive']
-        print(routeActive)
+        print("routeActive: ",routeActive)
     else:
         print(f"Unable to idenitfy data type: ", data["type"])
         
 def sanitize_json(data):
     try:
-        print('Sanitizing data...')
-        print(data)
-        
-        # Step 1: Ensure that all keys are quoted
-        # Manually handle the quoting of keys
-        fixed_data = data
-        fixed_data = fixed_data.replace('routeActie:', '"routeActive":')
-        fixed_data = fixed_data.replace('bearingBeore:', '"bearingBefore":')
-        fixed_data = fixed_data.replace('bearingAfer:', '"bearingAfter":')
-        fixed_data = fixed_data.replace('"waypints":', '"waypoints":')
-        fixed_data = fixed_data.replace('deart:', '"depart":')
-        fixed_data = fixed_data.replace('arrie:', '"arrive":')
-        fixed_data = fixed_data.replace('lft:', '"left":')
-        fixed_data = fixed_data.replace('rght:', '"right":')
+        print("Sanitizing data...")
+        print("Original Data:", data)
 
-        # Step 2: Fix incorrect booleans and typos
-        fixed_data = fixed_data.replace('rue', 'true')
-        fixed_data = fixed_data.replace('alse', 'false')
-        fixed_data = fixed_data.replace('True', 'true')
-        fixed_data = fixed_data.replace('False', 'false')
+        # Step 1: Convert dictionary input to JSON string
+        if isinstance(data, dict):
+            print("Input is a dictionary. Converting to JSON string.")
+            data = json.dumps(data)
+            # Step 3: Replace known incorrect keys and values
+            fixed_data = data
+            replacements = {
+            '"routeActie"': '"routeActive"',
+            'bearingBeore': '"bearingBefore"',
+            'bearingAfer': '"bearingAfter"',
+            '"waypints":': '"waypoints":',
+            'deart': '"depart"',
+            'arrie': '"arrive"',
+            'lft': '"left"',
+            'rght': '"right"',
+            'rue': 'true',
+            'alse': 'false',
+            'True': 'true',
+            'False': 'false',
+            ', .': ', 1.',  # Missing longitude fix
+            ', [13.': ', [103.',  # Incorrect prefix fix
+            'nll': 'null'
+            }
 
-        # Step 3: Fix known key typos using replace
-        fixed_data = fixed_data.replace('bearingBeore', 'bearingBefore')
-        fixed_data = fixed_data.replace('bearingAfer', 'bearingAfter')
-        fixed_data = fixed_data.replace('routeActie', 'routeActive')
-        fixed_data = fixed_data.replace('deart', 'depart')
-        fixed_data = fixed_data.replace('arrie', 'arrive')
+            for old, new in replacements.items():
+                fixed_data = fixed_data.replace(old, new)
 
-        # Step 4: Handle missing quotes around string values (manual approach)
-        # Wrap values in quotes if they appear as unquoted strings in an object
-        fixed_data = fixed_data.replace(':"', '": "')
-        fixed_data = fixed_data.replace('s,', 's",')
-        fixed_data = fixed_data.replace('t,', 't",')
-        fixed_data = fixed_data.replace('" ', '"')
-        
-        # Step 5: Balance braces (manually handle missing closing braces)
-        #if fixed_data.count('[') != fixed_data.count(']'):
-            #fixed_data += '['  # Add missing closing bracket for list
-        fixed_data = fixed_data.replace(', 10', ', [10')
+            print("Fixed Data:", fixed_data)
 
-        if fixed_data.count('{') != fixed_data.count('}'):
-            fixed_data += '}'  # Add missing closing brace for object
+        # Step 2: Ensure the input is a string
+        if isinstance(data, str):
+            print("Input is a string")
+            
+            # Step 2: Replace known incorrect keys and values
+            fixed_data = data
+            fixed_data = fixed_data.replace('"routeActie"', '"routeActive"')
+            fixed_data = fixed_data.replace('"bearingBeore"', '"bearingBefore"')
+            fixed_data = fixed_data.replace('"bearingBefor"', '"bearingBefore"')
+            fixed_data = fixed_data.replace('"bearingAfer"', '"bearingAfter"')
+            fixed_data = fixed_data.replace('"waypints":', '"waypoints":')
+            fixed_data = fixed_data.replace('"deart"', '"depart"')
+            fixed_data = fixed_data.replace('"turn,', '"turn",')
+            fixed_data = fixed_data.replace('"arrie"', '"arrive"')
+            fixed_data = fixed_data.replace('"lft"', '"left"')
+            fixed_data = fixed_data.replace('"rght"', '"right"')
+            fixed_data = fixed_data.replace('rue', 'true').replace('alse', 'false')
+            fixed_data = fixed_data.replace('True', 'true').replace('False', 'false')
+            fixed_data = fixed_data.replace('"turnTypes, ', '"turnTypes", ')
 
-        # Return the sanitized data
-        print(fixed_data)
-        return fixed_data
-    
+            # Step 3: Fix specific data issues
+            fixed_data = fixed_data.replace(', .', ', 1.')  # Missing longitude fix
+            fixed_data = fixed_data.replace(', [13.', ', [103.')  # Incorrect prefix fix
+            fixed_data = fixed_data.replace(', 113}', ', 113]}') 
+            fixed_data = fixed_data.replace('nll', 'null')  # Fix typos like `nll`
+            
+            print(fixed_data)
+
+        # Step 4: Validate and parse JSON
+        try:
+            json_data = ujson.loads(fixed_data)  # Parse into a dictionary
+            print("Parsed JSON Data:", json_data)
+            assignData(json_data)
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {e}")
+            raise ValueError("Invalid JSON format after sanitization.")
+
+        print("Type of json_data:", type(json_data))
+        # Step 5: Re-encode and return the sanitized JSON
+        #sanitized_json = json.dumps(json_data, indent=2)  # Beautify output
+        #print("Sanitized JSON:", sanitized_json)
+        return json_data
+
     except Exception as e:
         print(f"Error sanitizing JSON: {e}")
         return None
@@ -415,8 +426,7 @@ async def wait_for_write():
                     
                     formattedJSON = sanitize_json(full_data)
                     #Process the received JSON data
-                    _decode_data(formattedJSON)
-                    
+                                        
                     #Reset the buffer for future data
                     data_buffer = bytearray()
                 else:
@@ -441,7 +451,7 @@ async def main(connection):
                     await asyncio.sleep(0.5)  #Yield control to the event loop
                     
                     #Check for route stop
-                    print(routeActive)
+                    print("RouteActive: ", routeActive)
                     if not routeActive and previousRouteActive:  #routeActive was True, now it's False
                         print("Route stopped. Resetting instructions and turning points.")
                         reset_coordinates()
@@ -475,7 +485,9 @@ async def main(connection):
 
 #Peripheral task to advertise BLE service and start main
 async def peripheral_task():
+    print("Trying to connect")
     while True:
+        print("Trying to connect 2")
         try:
             async with await aioble.advertise(
                 _ADV_INTERVAL_MS,
@@ -535,10 +547,11 @@ async def start():
     t2 = asyncio.create_task(wait_for_write())  #Getting data from the web server
     t3 = asyncio.create_task(readSensors())
     #Set the `on_write` handler to process incoming writes to the characteristic
-    await asyncio.gather(t1, t3)
+    await asyncio.gather(t1,t3)
 
 if __name__ == "__main__":
     try:
+        print("MAC Address:", formatted_mac)
         asyncio.run(start())
     except KeyboardInterrupt:
-        print("Program terminated.")
+        print("Program terminated.")		
