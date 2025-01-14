@@ -13,7 +13,7 @@ from bluetooth import BLE
 
 #from micropython import const
 from machine import I2C, Pin
-from qmc5883L import HMC5883L	#Library for QMC5883L compass
+from hmc5883L import HMC5883L	#Library for QMC5883L compass
 import struct
 
 ble = BLE()
