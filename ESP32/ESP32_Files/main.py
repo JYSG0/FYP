@@ -95,45 +95,54 @@ async def sendData(data):
     await asyncio.sleep_ms(500)
 
 #Function to read GPS values
+# async def readGPS():
+#     global latitude, longitude, gps_data
+    
+#     while gps_serial.any():
+#         data = gps_serial.read()	#Get GPS data
+#         for byte in data:
+#             stat = my_gps.update(chr(byte))
+#             if stat is not None:
+#                 latitude_str = my_gps.latitude_string()
+#                 longitude_str = my_gps.longitude_string()
+
+#                 #Parse latitude
+#                 lat_deg = int(latitude_str.split('°')[0])
+#                 lat_min = float(latitude_str.split('°')[1].split("'")[0])
+#                 lat_dir = latitude_str[-1]  #Get direction (N/S)
+
+#                 #Parse longitude
+#                 lon_deg = int(longitude_str.split('°')[0])
+#                 lon_min = float(longitude_str.split('°')[1].split("'")[0])
+#                 lon_dir = longitude_str[-1]  #Get direction (E/W)
+
+#                 #Convert to decimal degrees
+#                 latitude = dmm_to_dd(lat_deg, lat_min, lat_dir)
+#                 longitude = dmm_to_dd(lon_deg, lon_min, lon_dir)
+
+#                 #Get precision performance
+#                 #satellites = my_gps.satellites_in_use()
+#                 #precision = my_gps.hdop()
+                
+#                 #print('lat:', latitude)
+#                 #print('lon:', longitude)
+#                 # print('satellites: ', satellites)
+#                 # print('precision: ', precision)
+                
+#                 #Send data to web server
+#                 gps_data = {
+#                     "latitude": latitude,
+#                     "longitude": longitude,
+#                 }
 async def readGPS():
     global latitude, longitude, gps_data
-    
-    while gps_serial.any():
-        data = gps_serial.read()	#Get GPS data
-        for byte in data:
-            stat = my_gps.update(chr(byte))
-            if stat is not None:
-                latitude_str = my_gps.latitude_string()
-                longitude_str = my_gps.longitude_string()
-
-                #Parse latitude
-                lat_deg = int(latitude_str.split('°')[0])
-                lat_min = float(latitude_str.split('°')[1].split("'")[0])
-                lat_dir = latitude_str[-1]  #Get direction (N/S)
-
-                #Parse longitude
-                lon_deg = int(longitude_str.split('°')[0])
-                lon_min = float(longitude_str.split('°')[1].split("'")[0])
-                lon_dir = longitude_str[-1]  #Get direction (E/W)
-
-                #Convert to decimal degrees
-                latitude = dmm_to_dd(lat_deg, lat_min, lat_dir)
-                longitude = dmm_to_dd(lon_deg, lon_min, lon_dir)
-
-                #Get precision performance
-                #satellites = my_gps.satellites_in_use()
-                #precision = my_gps.hdop()
-                
-                #print('lat:', latitude)
-                #print('lon:', longitude)
-                # print('satellites: ', satellites)
-                # print('precision: ', precision)
-                
-                #Send data to web server
-                gps_data = {
-                    "latitude": latitude,
-                    "longitude": longitude,
-                }
+    latitude = 1.3088
+    longitude = 103.7766
+    #Send data to web server
+    gps_data = {
+        "latitude": latitude,
+        "longitude": longitude,
+    }
                 
 def convert_to_sgt(utc_time):
     hour, minute, second = utc_time
