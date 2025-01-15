@@ -126,8 +126,8 @@ async def readGPS():
                 
                 #print('lat:', latitude)
                 #print('lon:', longitude)
-                #print('satellites: ', satellites)
-                #print('precision: ', precision)
+                # print('satellites: ', satellites)
+                # print('precision: ', precision)
                 
                 #Send data to web server
                 gps_data = {
@@ -228,8 +228,10 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
                 if within_tolerance:
                     msg += " Stop turning, angle reached."
                     currentStep += 1  #Proceed to the next step
+                    jetson = "straight"
                 else:
                     msg += " Keep turning."
+                    jetson = f"Turn {angle}"
             #action = f"{action} for {angle} degrees, {turnOri}"
         
         elif 'depart' in turn:
@@ -239,9 +241,12 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
                 msg += " Stop turning, angle reached."
                 angle = 0
                 currentStep += 1  #Proceed to the next step
+                jetson = "straight"
             else:
                 msg += " Keep turning."
                 angle = (azimuth - target_bearing + 180) % 360 - 180
+                jetson = f"Turn {angle}"
+                
 
         elif 'arrive' in turn:
             msg = "Arrive"
@@ -252,9 +257,11 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
             if within_tolerance:
                 msg += " Stop turning, angle reached."
                 angle = 0
+                jetson = "Stop"
             else:
                 msg += " Keep turning."
                 angle = (azimuth - target_bearing + 180) % 360 - 180
+                jetson = f"Turn {angle}"
 
         print(action)
         #await sensor_characteristic.write(msg)
@@ -263,9 +270,10 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
     else:
         #Continue moving towards the turning point
         msg = f"Keep going straight. Distance to next turn: {distance_to_turn:.2f} meters."
+        jetson = "straight"
         time.sleep(1)  #Simulate movement delay
         angle = 0
-        modifi = None
+        modifier = None
         #angleToTurn = 0
         within_tolerance = False
     
@@ -278,7 +286,8 @@ async def followInstructions(modifiers, turns, bearingAfter, bearingBefore, turn
         "distanceToTurn": distance_to_turn,
         "modifier": modifier,
         "angleToTurn": angle,
-        "within_tolerance": within_tolerance
+        "within_tolerance": within_tolerance,
+        "jetson": jetson
     }
         
     await sendData(dataToSend)
