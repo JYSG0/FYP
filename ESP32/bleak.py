@@ -111,7 +111,12 @@ async def main():
         except Exception as e:
             print(f"Unexpected error: {e}. Reconnecting...")
             await asyncio.sleep(1)
-
+            
+        finally:
+            if client.is_connected:
+                await client.disconnect()
+                print("Disconnected from BLE device.")
+            await asyncio.sleep(1)
 
 if __name__ == "__main__":
     asyncio.run(main())
