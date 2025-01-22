@@ -337,8 +337,8 @@ def Manual_drive(class_ids):
         steering_angle = map_value(pot_value, 0, 1023, -40, 40)
     except OSError as e:
         print(f"Error reading potentiometer: {e}")
+        time.sleep(0.1)
         pot_value, steering_angle = None, None
-
     # Default behavior: Stop motors if no keys are pressed
     odrv0.axis1.controller.input_vel = 0
     odrv0.axis0.controller.input_vel = 0
@@ -356,60 +356,55 @@ def Manual_drive(class_ids):
             print("Stopping...")
             odrv0.axis1.requested_state = 1  # Set ODrive to idle state
             odrv0.axis0.requested_state = 1  # Set ODrive to idle state
+
     if 0 in class_ids:
         print("Go")
-        odrv0.axis1.controller.input_vel = -1
+        odrv0.axis1.controller.input_vel = 1
         odrv0.axis0.controller.input_vel = -1
-        
+
     if keyboard.is_pressed('w'):
-        odrv0.axis1.controller.input_vel = -input_velocity
+        odrv0.axis1.controller.input_vel = input_velocity
         odrv0.axis0.controller.input_vel = -input_velocity
         if input_velocity == 1:
 
             #Sharp Left Turn
             if keyboard.is_pressed('a'):
                 odrv0.axis0.controller.input_vel = -1
-                odrv0.axis1.controller.input_vel = -0.5
+                odrv0.axis1.controller.input_vel = 0.5
             #Sharp Right Turn
             if keyboard.is_pressed('d'):
-                odrv0.axis1.controller.input_vel = -1
+                odrv0.axis1.controller.input_vel = 1
                 odrv0.axis0.controller.input_vel = -0.5
 
         if input_velocity == 2:
             #Sharp Left Turn
             if keyboard.is_pressed('a'):
                 odrv0.axis0.controller.input_vel = -2
-                odrv0.axis1.controller.input_vel = -1
+                odrv0.axis1.controller.input_vel = 1
             #Sharp Right Turn
             if keyboard.is_pressed('d'):
-                odrv0.axis1.controller.input_vel = -2
+                odrv0.axis1.controller.input_vel = 2
                 odrv0.axis0.controller.input_vel = -1
-    
-        if odrv0.axis1.controller.input_vel >= -2:
+   
+        if odrv0.axis1.controller.input_vel >= 2:
 
-            # People or Stop sign detected
-            if 4 in class_ids or 8 in class_ids and people_detect:
-                print("Stop")
-                odrv0.axis1.controller.input_vel = 0
-                odrv0.axis0.controller.input_vel = 0
-         
+            if people_detect:
+                # People or Stop sign detected
+                if 4 in class_ids or 8 in class_ids:
+                        print("Stop")
+                        odrv0.axis1.controller.input_vel = 0
+                        odrv0.axis0.controller.input_vel = 0
+
             # Slow or Speed sign or Hump or Pedestrain Sign detected
             elif 6 in class_ids or 7 in class_ids or 1 in class_ids or 3 in class_ids:
                 print("Slow")
-                odrv0.axis1.controller.input_vel = -0.8
+                odrv0.axis1.controller.input_vel = 0.8
                 odrv0.axis0.controller.input_vel = -0.8
 
     if keyboard.is_pressed('s'):
-        odrv0.axis1.controller.input_vel = input_velocity
+        odrv0.axis1.controller.input_vel = -input_velocity
         odrv0.axis0.controller.input_vel = input_velocity
         print(f"BACKWARD at speed: {input_velocity}")
-
-    # 'shift' key to brake
-    if keyboard.is_pressed('shift'):
-        odrv0.axis1.controller.input_vel = 0
-        odrv0.axis0.controller.input_vel = 0
-        input_velocity = 1
-        print ('STOP')
 
     if keyboard.is_pressed('o'):
         people_detect = not people_detect
@@ -419,6 +414,15 @@ def Manual_drive(class_ids):
 
         else:  # Stop people_detection
              print("Detection Off")
+
+    # 'shift' key to brake
+    if keyboard.is_pressed('shift'):
+        odrv0.axis1.controller.input_vel = 0
+        odrv0.axis0.controller.input_vel = 0
+        input_velocity = 1
+        
+        print ('STOP')
+
 
     if 2 in class_ids and steering_angle is not None and steering_angle <= 39:
         pwm.value = True
@@ -575,6 +579,11 @@ if  __name__ == '__main__':
             time.sleep(1)  # Keep the main thread alive
     except KeyboardInterrupt:
         print("Stopping all threads...")
-        # Stop the LiDAR before exiting
+        odrv0.axis1.controller.input_vel = 0
+        odrv0.axis1.requested_state = 1  # Set ODrive to idle state
+        odrv0.axis0.controller.input_vel = 0
+        odrv0.axis0.requested_state = 1  # Set ODrive to idle state
+        lidar_thread.join()
+        detection_thread.join()
         lidar.stop()
     # main()
