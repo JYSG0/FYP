@@ -33,8 +33,6 @@ chan2=AnalogIn(ads, ADS.P3)
 print(chan1.value, chan1.voltage)
 print(chan2.value, chan2.voltage)
 
-
-
 # Initialize pygame
 pygame.init()
 
@@ -295,10 +293,14 @@ def detection(cap, run_detection=True):
                     center_point = get_center_of_bbox(box)
                     # x_center = center_point[0] * (screen_width/640)
                     # y_center = center_point[1] * (screen_height/480)
+                    # Extract the region of the depth map corresponding to the bounding box
+
                     cv2.circle(annotated_frame, center_point, 5, (0, 0, 255), -1)
+
                     distance = success[center_point[1] , center_point[0]]
                     cv2.putText(annotated_frame, "{}mm".format(distance), (center_point[0], center_point[1] - 20), cv2.FONT_HERSHEY_PLAIN, 2, (0, 0, 0), 2)
-            
+      
+
             # Process and print class names for each detection
             for result in results:
                 class_ids = result.boxes.cls.tolist()
@@ -339,8 +341,8 @@ def Manual_drive(class_ids):
         steering_angle = map_value(pot_value, 0, 1023, -40, 40)
     except OSError as e:
         print(f"Error reading potentiometer: {e}")
+        time.sleep(0.1)
         pot_value, steering_angle = None, None
-
     # Default behavior: Stop motors if no keys are pressed
     odrv0.axis1.controller.input_vel = 0
     odrv0.axis0.controller.input_vel = 0
@@ -361,34 +363,34 @@ def Manual_drive(class_ids):
 
     if 0 in class_ids:
         print("Go")
-        odrv0.axis1.controller.input_vel = -1
+        odrv0.axis1.controller.input_vel = 1
         odrv0.axis0.controller.input_vel = -1
 
     if keyboard.is_pressed('w'):
-        odrv0.axis1.controller.input_vel = -input_velocity
+        odrv0.axis1.controller.input_vel = input_velocity
         odrv0.axis0.controller.input_vel = -input_velocity
         if input_velocity == 1:
 
             #Sharp Left Turn
             if keyboard.is_pressed('a'):
                 odrv0.axis0.controller.input_vel = -1
-                odrv0.axis1.controller.input_vel = -0.5
+                odrv0.axis1.controller.input_vel = 0.5
             #Sharp Right Turn
             if keyboard.is_pressed('d'):
-                odrv0.axis1.controller.input_vel = -1
+                odrv0.axis1.controller.input_vel = 1
                 odrv0.axis0.controller.input_vel = -0.5
 
         if input_velocity == 2:
             #Sharp Left Turn
             if keyboard.is_pressed('a'):
                 odrv0.axis0.controller.input_vel = -2
-                odrv0.axis1.controller.input_vel = -1
+                odrv0.axis1.controller.input_vel = 1
             #Sharp Right Turn
             if keyboard.is_pressed('d'):
-                odrv0.axis1.controller.input_vel = -2
+                odrv0.axis1.controller.input_vel = 2
                 odrv0.axis0.controller.input_vel = -1
    
-        if odrv0.axis1.controller.input_vel >= -2:
+        if odrv0.axis1.controller.input_vel >= 2:
 
             if people_detect:
                 # People or Stop sign detected
@@ -400,11 +402,11 @@ def Manual_drive(class_ids):
             # Slow or Speed sign or Hump or Pedestrain Sign detected
             elif 6 in class_ids or 7 in class_ids or 1 in class_ids or 3 in class_ids:
                 print("Slow")
-                odrv0.axis1.controller.input_vel = -0.8
+                odrv0.axis1.controller.input_vel = 0.8
                 odrv0.axis0.controller.input_vel = -0.8
 
     if keyboard.is_pressed('s'):
-        odrv0.axis1.controller.input_vel = input_velocity
+        odrv0.axis1.controller.input_vel = -input_velocity
         odrv0.axis0.controller.input_vel = input_velocity
         print(f"BACKWARD at speed: {input_velocity}")
 
@@ -434,7 +436,7 @@ def Manual_drive(class_ids):
     if 5 in class_ids and steering_angle is not None and steering_angle >= -25:
         pwm.value = True
         steering.value = True
-        print(f"Steering Left: Potentiometer Value: {int(steering_angle)}")
+        print(f"Steering Right: Potentiometer Value: {int(steering_angle)}")
 
     if keyboard.is_pressed('a') and steering_angle is not None and steering_angle <= 39:  # Steer Left
         pwm.value = True
@@ -478,8 +480,7 @@ def main():
         if current_time - last_voltage_print_time >= 0.3:  # 0.3 second interval
             print("ODrive Voltage:", odrv0.vbus_voltage)
             last_voltage_print_time = current_time        # Poll for pygame events
-        if steering_angle is None:
-            return
+ 
         
         detection(cap)
 
@@ -495,10 +496,7 @@ def main():
                 odrv0.axis1.requested_state = 3  # Set ODrive to idle state
                 odrv0.axis0.requested_state = 3  # Set ODrive to idle state
 
-        pot_value = Manual_drive(class_ids)
-        if pot_value == None:
-            continue
-        
+   
         # If recording, write the frame to the video output file
         if recording:
             out_combined.write(frame1)
@@ -559,6 +557,7 @@ def main():
     cv2.destroyAllWindows()  # Close windows after exiting
     # lidar.stop()
     print("Exiting all components.")
+    detection_thread.join()
 
 
 exit_flag = False
@@ -581,6 +580,8 @@ if  __name__ == '__main__':
             time.sleep(1)  # Keep the main thread alive
     except KeyboardInterrupt:
         print("Stopping all threads...")
+        detection_thread.join()
+
         # Stop the LiDAR before exiting
         # lidar.stop()
     # main()
