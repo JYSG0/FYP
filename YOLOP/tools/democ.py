@@ -46,9 +46,7 @@ import adafruit_ads1x15.ads1115 as ADS
 from adafruit_ads1x15.analog_in import AnalogIn
 
 #ESP
-from fastapi import FastAPI, WebSocket
-import uvicorn
-import json
+import keyboard
 
 normalize = transforms.Normalize(
     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
@@ -58,8 +56,8 @@ transform = transforms.Compose([
     normalize,
 ])
 
-# Initialize Pygame for PS4 controller vibration
-pygame.init()
+# # Initialize Pygame for PS4 controller vibration
+# pygame.init()
 
 # Store connected WebSocket clients (if needed for multi-client scenarios)
 connected_clients = []
@@ -78,6 +76,14 @@ is_recording = False
 manual_mode = True
 start_mode = True
 exit_flag = False
+# Global variable to track drivable area detection and object detection
+Steering = False
+start_mode = True
+speed_mode = False
+lane_detect = False
+input_velocity = 1  # Global variable to track velocity for motors
+
+
 # Timing variables
 last_press_time = 0
 double_tap_threshold = 0.3  # Maximum time (seconds) between taps to count as a double-tap
@@ -131,20 +137,12 @@ else:
 def map_value(value, input_min, input_max, output_min, output_max):
     return ((value - input_min) * (output_max - output_min)) / (input_max - input_min) + output_min
 
-def Driving(drivable,detected,lane_position, odrv0): 
- # Read potentiometer value
-    try:
-        pot_value = map_value(chan1.value, 0, 26230, 0, 1023)
-        steering_angle = map_value(pot_value, 0, 1023, -40, 40)
-    except OSError as e:
-        print(f"Error reading potentiometer: {e}")
-        time.sleep(0.1)
-        pot_value, steering_angle = None, None
-    if pot_value == None:
-        return
+def Driving(drivable,lane_position, odrv0, steering_angle, lane_detect): 
     if steering_angle is None:
         return
-    if not detected:
+
+
+    if  lane_detect:
         if drivable:
             print("Drivable area detected.")
             odrv0.axis0.controller.input_vel = -1.0  # Move forward
@@ -156,7 +154,7 @@ def Driving(drivable,detected,lane_position, odrv0):
             odrv0.axis0.controller.input_vel = 0  # Stop
             odrv0.axis1.controller.input_vel = 0  # Stop
 
-        if lane_position == "left" and not detected and steering_angle <= 25:
+        if lane_position == "left" and  lane_detect and steering_angle <= 15:
             print("Vehicle drifting left. Slowing down.")
             pwm.value = True
             steering.value = False
@@ -164,29 +162,29 @@ def Driving(drivable,detected,lane_position, odrv0):
             odrv0.axis1.controller.input_vel = 1   # Stop
 
 
-        elif lane_position == "right" and not detected and steering_angle >= -25:
+        elif lane_position == "right" and  lane_detect and steering_angle >= -8:
             print("Vehicle drifting right. Slowing down.")
             pwm.value = True
             steering.value = True
             odrv0.axis0.controller.input_vel = -1
             odrv0.axis1.controller.input_vel = 0.8   # Stop
 
-        if steering_angle >= 25 and lane_position == "left": #Steer Right Limit
+        if steering_angle >= 15 and lane_position == "left": #Steer Right Limit
             pwm.value = False
             steering.value = False
             print ("No Steering")          
-        if steering_angle <= -25 and lane_position == "right": #Steer Left Limit
+        if steering_angle <= -8 and lane_position == "right": #Steer Left Limit
             pwm.value = False
             steering.value = False
             print ("No Steering")
 
         if lane_position == "center" or not lane_position: # Joystick IDLE
-            if 1 <= steering_angle <= 25:
+            if 1 <= steering_angle <= 15:
                 print("Drifting Left, turning right")
                 pwm.value = True
                 steering.value = True
 
-            if -25 <= steering_angle <= -1:
+            if -8 <= steering_angle <= -1:
                 print("Drifting right, turning Left")
                 pwm.value = True
                 steering.value = False
@@ -198,7 +196,7 @@ def Driving(drivable,detected,lane_position, odrv0):
 
             pwm.value = False
             steering.value = True
-            if pot_value is not None:
+            if steering_angle is not None:
                 print(f"No Steering: Potentiometer Value: {steering_angle}")
 
 
@@ -369,16 +367,112 @@ def process_segmentation(da_seg_mask, ll_seg_mask, img_det):
 
     return drivable, lane_position
 
+
+def Manual_drive(odrv0, steering_angle, lane_position):
+    global Steering, start_mode, input_velocity,speed_mode, lane_detect
+
+    # Default behavior: Stop motors if no keys are pressed
+    odrv0.axis1.controller.input_vel = 0
+    odrv0.axis0.controller.input_vel = 0
+    pwm.value = False
+    steering.value = False
+    # Handle specific key presses
+    if keyboard.is_pressed('e'):
+        start_mode = not start_mode
+
+        if start_mode:  # Start motors
+            print("Starting...")
+            odrv0.axis0.requested_state = 8  # Start Motor
+            odrv0.axis1.requested_state = 8  # Start Motor
+        else:  # Stop motors
+            print("Stopping...")
+            odrv0.axis1.requested_state = 1  # Set ODrive to idle state
+            odrv0.axis0.requested_state = 1  # Set ODrive to idle state
+
+    if keyboard.is_pressed('w'):
+        odrv0.axis1.controller.input_vel = input_velocity
+        odrv0.axis0.controller.input_vel = -input_velocity
+        if input_velocity == 1:
+
+            #Sharp Left Turn
+            if keyboard.is_pressed('a'):
+                odrv0.axis0.controller.input_vel = -1
+                odrv0.axis1.controller.input_vel = 0.5
+            #Sharp Right Turn
+            if keyboard.is_pressed('d'):
+                odrv0.axis1.controller.input_vel = 1
+                odrv0.axis0.controller.input_vel = -0.5
+
+        if input_velocity == 2:
+            #Sharp Left Turn
+            if keyboard.is_pressed('a'):
+                odrv0.axis0.controller.input_vel = -2
+                odrv0.axis1.controller.input_vel = 1
+            #Sharp Right Turn
+            if keyboard.is_pressed('d'):
+                odrv0.axis1.controller.input_vel = 2
+                odrv0.axis0.controller.input_vel = -1
+   
+    if keyboard.is_pressed('s'):
+        odrv0.axis1.controller.input_vel = -input_velocity
+        odrv0.axis0.controller.input_vel = input_velocity
+        print(f"BACKWARD at speed: {input_velocity}")
+
+    if keyboard.is_pressed('o'):
+        lane_detect = not lane_detect
+        time.sleep(0.5)
+        if lane_detect:  # Start lane_detection
+            print("Detection On")
+
+        else:  # Stop lane_detection
+             print("Detection Off")
+    if lane_position == "SAVE ME":
+        lane_detect = False
+    # 'shift' key to brake
+    if keyboard.is_pressed('shift'):
+        odrv0.axis1.controller.input_vel = 0
+        odrv0.axis0.controller.input_vel = 0
+        input_velocity = 1
+        
+        print ('STOP')
+
+
+    if keyboard.is_pressed('a') and steering_angle is not None and steering_angle <= 15:  # Steer Left
+        pwm.value = True
+        steering.value = False
+        print(f"Steering Left: Potentiometer Value: {int(steering_angle)}")
+
+    if keyboard.is_pressed('d')  and steering_angle is not None and steering_angle >= -8:  # Steer Right
+        pwm.value = True
+        steering.value = True
+        print(f"Steering Right: Potentiometer Value: {int(steering_angle)}")
+
+    # Spacebar to increase input velocity
+    if keyboard.is_pressed('space')  and not speed_mode:
+        speed_mode = True
+        if input_velocity == 1:
+            input_velocity = 2
+            print(f"Increased velocity to: {input_velocity}")
+        else:
+            input_velocity = 1
+            print(f"Increased velocity to: {input_velocity}")
+
+    # Reset `speed_mode` once the spacebar is released
+    if not keyboard.is_pressed('space') :
+        speed_mode = False
+  
+    if steering_angle is None:
+        return
+    return lane_detect
 # Main detection and control loop
 def detect(cfg, opt):
     #global variables to pass
-    global detected, is_recording, vid_counter, img_counter, img_det, vid_name , vid_name1 , out1
-    detected = False
+    global is_recording, vid_counter, img_counter, img_det, vid_name , vid_name1 , out1
     distance = 0
     logger, _, _ = create_logger(cfg, cfg.LOG_DIR, 'demo')
     device = select_device(logger, opt.device)
-    # Set the width and height of the screen (width, height), and name the window.
-    screen = pygame.display.set_mode((640, 480))
+    # # Set the width and height of the screen (width, height), and name the window.
+    # screen = pygame.display.set_mode((640, 480))
 
     # Prepare output directory
     if os.path.exists(opt.save_dir):
@@ -388,7 +482,6 @@ def detect(cfg, opt):
     # setting device on GPU if available, else CPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Using device:', device)
-    print()
 
     #Additional Info when using cuda
     if device.type == 'cuda':
@@ -447,13 +540,23 @@ def detect(cfg, opt):
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out1 = cv2.VideoWriter(vid_name1, fourcc, 20.0, (img_det.shape[1], img_det.shape[0]))
             is_recording = True
-     
-
+        
+    # Read potentiometer value
+        try:
+            pot_value = map_value(chan1.value, 0, 26230, 0, 1023)
+            steering_angle = map_value(pot_value, 0, 1023, -40, 40)
+        except OSError as e:
+            print(f"Error reading potentiometer: {e}")
+            time.sleep(0.1)
+            pot_value, steering_angle = None, None
+ 
+    
         # Analyze results
         drivable, lane_position = process_segmentation(da_seg_mask, ll_seg_mask, img_det)
-   
-        Driving(drivable,detected,lane_position, odrv0)
-        
+        Manual_drive(odrv0,steering_angle, lane_position)
+        lane_detect = Manual_drive(odrv0,steering_angle, lane_position)
+
+        Driving(drivable,lane_position, odrv0, steering_angle,lane_detect)
         # GPU memory usage
         allocated_memory = torch.cuda.memory_allocated(device) / (1024 ** 2)  # In MB
         reserved_memory = torch.cuda.memory_reserved(device) / (1024 ** 2)    # In MB
@@ -480,7 +583,7 @@ def detect(cfg, opt):
 
             img_counter += 1
         # Stop on key press
-        if key == ord('q'):
+        if keyboard.is_pressed('q') or keyboard.is_pressed('esc'):
             emergency_stop(odrv0)
             break
         if exit_flag:
@@ -495,13 +598,13 @@ def detect(cfg, opt):
 
     vid_counter += 1
     out1.release()
-    pygame.quit
+    # pygame.quit
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='weights/End-to-end.pth', help='Path to model weights')
-    parser.add_argument('--source', type=str, default='fieldestv2 - Made with Clipchamp.mp4', help='Input source (file/folder)')
+    parser.add_argument('--source', type=str, default='6', help='Input source (file/folder)')
     parser.add_argument('--img-size', type=int, default=640, help='Inference size (pixels)')
     parser.add_argument('--device', default='0,1,2,3', help='Device: cpu or cuda')
     parser.add_argument('--save-dir', type=str, default='inference/output', help='Directory to save results')
