@@ -256,6 +256,7 @@ def detection(cap, run_detection=True):
 # Manual control
 def manual_control():
     global input_velocity, start_mode, movement
+    movement = None
     print("Manual mode: vehicle stopped")
     odrv0.axis1.controller.input_vel = 0
     odrv0.axis0.controller.input_vel = 0
@@ -286,8 +287,13 @@ def manual_control():
         movement = "backward"
 
     print(movement)
-    wheelsMovement(movement)
-    steer()
+
+    if movement == None:
+        odrv0.axis1.controller.input_vel = 0
+        odrv0.axis0.controller.input_vel = 0
+    else:
+        wheelsMovement(movement)
+        steer()
     
     if keyboard.is_pressed('shift'):
         odrv0.axis1.controller.input_vel = 0
@@ -368,9 +374,16 @@ def wheelsMovement(movement):
             odrv0.axis0.controller.input_vel = -0.8
 
 def steer():
-    global minBrozimuth, maxBrozimuth, brozimuth, classIDs, pot_value
+    # global minBrozimuth, maxBrozimuth, brozimuth, classIDs, pot_value
     pot_value = map_value (chan1.value, 0, 26230, 0, 1023)
     steering_angle = map_value(pot_value, 0 , 1023, -40 ,40)
+
+    steerLeftLimit = 10
+    steerRightLimit = -10
+    
+    #Middle/Straight values
+    steerLeftTurnLimit = -6
+    steerRightTurnLimit = -3
 
     if auto:
         print("auto: ", steering_angle)
@@ -378,10 +391,11 @@ def steer():
         # if minBrozimuth <= steering_angle <= maxBrozimuth:  #If steering angle is within turn range
 
         #If exceed limit, set to limit
-        if brozimuth > 9:
-            brozimuth = 9
-        elif brozimuth <-2:
-            brozimuth = -2
+        #Limit for auto
+        if brozimuth > steerLeftLimit:
+            brozimuth = steerLeftLimit
+        elif brozimuth < steerRightLimit:
+            brozimuth = steerRightLimit
 
         print("In brozimuth range")
         pwm.value = True  # Set GPIO12 high
@@ -392,17 +406,17 @@ def steer():
             pwm.value = False
             steering.value = False
 
-            if within_tolerance:
-                if -1 <= steering_angle <= 0:
+            if within_tolerance:    #within_tolerance to turn
+                if steerLeftTurnLimit <= steering_angle <= steerRightTurnLimit:
                     print("In steering range")
                     pwm.value = False
                     steering.value = False
-                if steering_angle <= -1:  # Steer Left
+                if steering_angle <= steerLeftTurnLimit:  # Steer Left
                     pwm.value = True
                     steering.value = False
                     if pot_value is not None:
                         print(f"Steering Left: Potentiometer Value: {int(steering_angle)}")
-                elif steering_angle > 0:    #Steer right
+                elif steering_angle > steerRightTurnLimit:    #Steer right
                     pwm.value = True
                     steering.value = True
                     if pot_value is not None:
@@ -431,7 +445,7 @@ def steer():
         # 'a' is pressed
         if keyboard.is_pressed('a') or 2 in classIDs and steering_angle is not None:
             print("Steer left", steering_angle)
-            if steering_angle <= 9:  # Steer Left
+            if steering_angle <= steerLeftLimit:  # Steer Left
                 pwm.value = True
                 steering.value = False
                 if pot_value is not None:
@@ -444,7 +458,7 @@ def steer():
         
         elif keyboard.is_pressed('d') or 5 in classIDs and steering_angle is not None:
             print("Steer right", steering_angle)
-            if steering_angle >= -13:    #Steer right
+            if steering_angle >= steerRightLimit:    #Steer right
                 pwm.value = True
                 steering.value = True
                 if pot_value is not None:
@@ -474,11 +488,18 @@ def steer():
 # Toggle between manual and auto
 def toggle_control():
     global auto, input_velocity, steering_angle, speedMode
-    while True:
+    o_pressed_time = None  # Track when 'o' is first pressed
 
-        if keyboard.is_pressed('o'):
-            auto = not auto
-            print(f"Switched to {'Auto' if auto else 'Manual'} mode")
+    while True:
+        if keyboard.is_pressed('o'):    #press o or if held longer than 1 sec
+            if o_pressed_time is None:
+                o_pressed_time = time.time()  # Start tracking time
+            elif time.time() - o_pressed_time > 1:  # Check if held for 1 second
+                auto = not auto
+                print(f"Switched to {'Auto' if auto else 'Manual'} mode")
+            else:
+                o_pressed_time = None  # Track when 'o' is first pressed
+
 
         if keyboard.is_pressed('space'):
             speedMode = not speedMode
