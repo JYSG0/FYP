@@ -107,9 +107,15 @@ steering = digitalio.DigitalInOut(board.D13)
 pwm.direction = digitalio.Direction.OUTPUT
 steering.direction = digitalio.Direction.OUTPUT
 
+light1 = digitalio.DigitalInOut(board.D23)
+light2 = digitalio.DigitalInOut(board.D26)
+light1.direction = digitalio.Direction.OUTPUT
+light2.direction = digitalio.Direction.OUTPUT
 #Initial Low 
 pwm.value = False  # Set GPIO12 high
 steering.value = False  # Set GPIO13 low
+light1.value = False  # Set GPIO12 high
+light2.value = False  # Set GPIO13 low
 
 # Create directories for output if they don't exist
 output_image_dir = 'output_images'
@@ -158,6 +164,9 @@ def Driving(drivable,lane_position, odrv0, steering_angle, lane_detect):
             print("Vehicle drifting left. Slowing down.")
             pwm.value = True
             steering.value = False
+            light1.value = True
+            light2.value = False  
+
             odrv0.axis0.controller.input_vel = -0.8
             odrv0.axis1.controller.input_vel = 1   # Stop
 
@@ -166,6 +175,8 @@ def Driving(drivable,lane_position, odrv0, steering_angle, lane_detect):
             print("Vehicle drifting right. Slowing down.")
             pwm.value = True
             steering.value = True
+            light1.value = False
+            light2.value = True  
             odrv0.axis0.controller.input_vel = -1
             odrv0.axis1.controller.input_vel = 0.8   # Stop
 
@@ -183,7 +194,8 @@ def Driving(drivable,lane_position, odrv0, steering_angle, lane_detect):
                 print("Drifting Left, turning right")
                 pwm.value = True
                 steering.value = True
-
+                light1.value = False
+                light2.value = False
             if -8 <= steering_angle <= -1:
                 print("Drifting right, turning Left")
                 pwm.value = True
@@ -200,7 +212,7 @@ def Driving(drivable,lane_position, odrv0, steering_angle, lane_detect):
                 print(f"No Steering: Potentiometer Value: {steering_angle}")
 
 
-
+ 
 # Function to connect to ODrive
 def connect_to_odrive():
     try:
@@ -369,7 +381,7 @@ def process_segmentation(da_seg_mask, ll_seg_mask, img_det):
 
 
 def Manual_drive(odrv0, steering_angle, lane_position):
-    global Steering, start_mode, input_velocity,speed_mode, lane_detect
+    global Steering, start_mode, input_velocity,speed_mode, lane_detect, light1, light2
 
     # Default behavior: Stop motors if no keys are pressed
     odrv0.axis1.controller.input_vel = 0
@@ -427,6 +439,8 @@ def Manual_drive(odrv0, steering_angle, lane_position):
         else:  # Stop lane_detection
              print("Detection Off")
     if lane_position == "SAVE ME":
+        light1.value = True
+        light2.value = True
         lane_detect = False
     # 'shift' key to brake
     if keyboard.is_pressed('shift'):
@@ -604,7 +618,7 @@ def detect(cfg, opt):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='weights/End-to-end.pth', help='Path to model weights')
-    parser.add_argument('--source', type=str, default='6', help='Input source (file/folder)')
+    parser.add_argument('--source', type=str, default='fieldestv2 - Made with Clipchamp.mp4', help='Input source (file/folder)')
     parser.add_argument('--img-size', type=int, default=640, help='Inference size (pixels)')
     parser.add_argument('--device', default='0,1,2,3', help='Device: cpu or cuda')
     parser.add_argument('--save-dir', type=str, default='inference/output', help='Directory to save results')
