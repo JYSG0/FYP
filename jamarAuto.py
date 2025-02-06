@@ -27,6 +27,7 @@ import pygame
 
 # Globals
 auto = False  # Manual mode by default
+manual = True
 input_velocity = 1  # Default velocity
 routeActive = False
 connected_clients = []  # Store WebSocket clients
@@ -59,9 +60,18 @@ steering = digitalio.DigitalInOut(board.D13)
 pwm.direction = digitalio.Direction.OUTPUT
 steering.direction = digitalio.Direction.OUTPUT
 
+#Initialise GPIO Pins
+light1 = digitalio.DigitalInOut(board.D23) #Yellow light
+light2 = digitalio.DigitalInOut(board.D26) #Yellow light
+light1.direction = digitalio.Direction.OUTPUT
+light2.direction = digitalio.Direction.OUTPUT
+
+
 #Initial actuator IDLE 
 pwm.value = False  # Set GPIO12 HIGH
 steering.value = False  # Set GPIO13 HIGH
+light1.value = False  # Set GPIO12 HIGH
+light2.value = False  # Set GPIO13 HIGH
 
 classIDs = []
 
@@ -310,8 +320,6 @@ def auto_control():
     #Axis 1 = right wheel
     #Axis 0 = left wheel
 
-    time.sleep(1)
-
     if routeActive:
         if dir == "straight":
             movement = "forward"
@@ -374,6 +382,7 @@ def wheelsMovement(movement):
             odrv0.axis0.controller.input_vel = -0.8
 
 def steer():
+    global brozimuth
     # global minBrozimuth, maxBrozimuth, brozimuth, classIDs, pot_value
     pot_value = map_value (chan1.value, 0, 26230, 0, 1023)
     steering_angle = map_value(pot_value, 0 , 1023, -40 ,40)
@@ -487,18 +496,25 @@ def steer():
 
 # Toggle between manual and auto
 def toggle_control():
-    global auto, input_velocity, steering_angle, speedMode
+    global auto, input_velocity, steering_angle, speedMode, light1,light2, manual
     o_pressed_time = None  # Track when 'o' is first pressed
 
     while True:
-        if keyboard.is_pressed('o'):    #press o or if held longer than 1 sec
-            if o_pressed_time is None:
-                o_pressed_time = time.time()  # Start tracking time
-            elif time.time() - o_pressed_time > 1:  # Check if held for 1 second
-                auto = not auto
-                print(f"Switched to {'Auto' if auto else 'Manual'} mode")
-            else:
-                o_pressed_time = None  # Track when 'o' is first pressed
+        if keyboard.is_pressed('o') and not auto:   #Check if it was in manual mode before
+            auto = True
+            manual = False
+            print(f"Switched to {'Auto' if auto else 'Manual'} mode")
+            light1.value  = True
+            light2.value =True
+            auto_control()
+
+        if keyboard.is_pressed('p') and not manual: #Check if it was in auto mode before
+            manual = True
+            auto = False
+            print(f"Switched to {'Auto' if auto else 'Manual'} mode")
+            light1.value  = False
+            light2.value =False
+            manual_control()
 
 
         if keyboard.is_pressed('space'):
@@ -510,11 +526,6 @@ def toggle_control():
             else:
                 input_velocity = 1
                 print(f"Velocity to: {input_velocity}")
-
-        if auto:
-            auto_control()
-        else:
-            manual_control()
 
         time.sleep(0.1)
 
