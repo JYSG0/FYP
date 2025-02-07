@@ -7,16 +7,16 @@ import board
 pygame.init()
 
 # Pin Definitions
-PWM_PIN = board.D27  # Replace with your actual PWM-capable pin if needed
-STEERING_PIN = board.D12  # Replace with your actual steering pin
+PWM2_PIN = board.D27  # Replace with your actual PWM-capable pin if needed
+DIRECTION_FB_PIN = board.D12  # Replace with your actual direction pin
 ENABLE_PIN = board.D6  # Replace with your actual enable pin
 
 # Set up GPIO pins using digitalio
-pwm = digitalio.DigitalInOut(PWM_PIN)
-pwm.direction = digitalio.Direction.OUTPUT
+pwm2 = digitalio.DigitalInOut(PWM2_PIN)
+pwm2.direction = digitalio.Direction.OUTPUT
 
-steering = digitalio.DigitalInOut(STEERING_PIN)
-steering.direction = digitalio.Direction.OUTPUT
+directionFB = digitalio.DigitalInOut(DIRECTION_FB_PIN)
+directionFB.direction = digitalio.Direction.OUTPUT
 
 enable = digitalio.DigitalInOut(ENABLE_PIN)
 enable.direction = digitalio.Direction.OUTPUT
@@ -64,8 +64,8 @@ def control_loop():
         if keys[pygame.K_a] and not is_moving_forward and not is_reversing and not motion_completed:
             print("Key 'a' pressed: Moving forward for 3 seconds")
             is_moving_forward = True
-            steering.value = False  # Forward direction
-            simulate_pwm(pwm, duration=3, duty_cycle=50)  # Run forward for 3 seconds
+            directionFB.value = False  # Forward direction
+            simulate_pwm(pwm2, duration=3, duty_cycle=50)  # Run forward for 3 seconds
             print("Forward motion complete.")
             is_moving_forward = False
             is_reversing = True  # Prepare for reverse motion after release
@@ -73,8 +73,8 @@ def control_loop():
         # If 'a' is released and reversing is pending
         if not keys[pygame.K_a] and is_reversing:
             print("Key 'a' released: Moving backward for 3 seconds")
-            steering.value = True  # Reverse direction
-            simulate_pwm(pwm, duration=3, duty_cycle=50)  # Run backward for 3 seconds
+            directionFB.value = True  # Reverse direction
+            simulate_pwm(pwm2, duration=3, duty_cycle=50)  # Run backward for 3 seconds
             print("Reverse motion complete.")
             is_reversing = False
             motion_completed = True  # Mark the motion cycle as complete
@@ -87,7 +87,7 @@ def control_loop():
         # Exit if 'ESC' is pressed
         if keys[pygame.K_ESCAPE]:
             enable.value = False
-            pwm.value = False  # Stop the PWM
+            pwm2.value = False  # Stop the PWM
             break
 
         time.sleep(0.001)  # Small delay to avoid busy looping
@@ -97,9 +97,8 @@ try:
     print("Hold 'a' to move forward for 3 seconds. Release 'a' to move backward for 3 seconds. Press ESC to exit.")
     control_loop()
 finally:
-    pwm.value = False
+    pwm2.value = False
     enable.value = False
-    steering.value = False
+    directionFB.value = False
     pygame.quit()
     print("Exited successfully.")
-
